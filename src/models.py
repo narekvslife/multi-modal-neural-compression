@@ -183,7 +183,7 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
 
         return x_hats, likelihoods
 
-    def _get_reconstruction_loss(self, x, x_hat, loss_type: str = "mse") -> torch.Tensor:
+    def reconstruction_loss(self, x, x_hat, loss_type: str = "mse") -> torch.Tensor:
         """
         Given a batch of images, this function returns the reconstruction loss
 
@@ -215,17 +215,11 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
 
         return loss
 
-    def __get_number_of_pixels(self, x_hats):
-        if type(x_hats) == dict:
-            return torch.stack([torch.tensor(x_hats[task].shape) for task in self.tasks]).sum(0)
-        else:
-            return x_hats.shape
+    def __get_number_of_pixels(self, x_hats) -> int:
+        B, _, H, W = torch.stack([torch.tensor(x_hats[task].shape) for task in self.tasks]).sum(0)
+        return B * H * W
 
-    def _get_compression_loss(self, x, x_hats, likelihoods):
-
-        B, _, H, W = self.__get_number_of_pixels(x_hats)
-
-        num_pixels = B * H * W
+    def compression_loss(self, likelihoods: Dict[str, torch.Tensor], num_pixels: int):
         compression_loss = torch.log(likelihoods["y"]).sum()
         compression_loss += torch.log(likelihoods["z"]).sum()
         compression_loss /= -torch.log(torch.tensor(2)) * num_pixels
@@ -239,11 +233,13 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
         compression_loss = 0
 
         for task in self.tasks:
-            reconstruction_loss += self._get_reconstruction_loss(x=batch[task],
-                                                                 x_hat=x_hats[task],
-                                                                 loss_type="mse")
+            reconstruction_loss += self.reconstruction_loss(x=batch[task],
+                                                            x_hat=x_hats[task],
+                                                            loss_type="mse")
 
-        compression_loss += self._get_compression_loss(x=batch, x_hats=x_hats, likelihoods=likelihoods)
+        compression_loss += self.compression_loss(likelihoods=likelihoods,
+                                                  num_pixels=self.__get_number_of_pixels(x_hats))
+
         return reconstruction_loss + lmbd * compression_loss
 
     def training_step(self, batch, batch_idx):
@@ -310,17 +306,17 @@ class SingleTaskCompressor(MultiTaskMixedLatentCompressor):
 
         self.task = task
 
+    def __get_number_of_pixels(self, x) -> int:
+        B, _, H, W = x.shape
+        return B * H * W
+
     def get_loss(self, batch, lmbd=0.5):
-        x_hats, likelihoods = self.forward(batch)
+        x_hat, likelihoods = self.forward(batch)
 
-        reconstruction_loss = 0
-        compression_loss = 0
+        reconstruction_loss = self.reconstruction_loss(batch, x_hat, "mse")
+        compression_loss = self.compression_loss(likelihoods=likelihoods,
+                                                 num_pixels=self.__get_number_of_pixels(x_hat))
 
-        reconstruction_loss += self._get_reconstruction_loss(x=batch,
-                                                             x_hat=x_hats,
-                                                             loss_type="mse")
-
-        compression_loss += self._get_compression_loss(x=batch, x_hats=x_hats, likelihoods=likelihoods)
         return reconstruction_loss + lmbd * compression_loss
 
     def forward(self, batch) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:

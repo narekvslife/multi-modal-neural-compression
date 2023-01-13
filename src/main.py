@@ -31,19 +31,19 @@ def main():
                                    transform=transform,
                                    max_images=100)
 
-    multitask_dataloader = DataLoader(dataset,
-                                      batch_size=BATCH_SIZE,
-                                      collate_fn=transforms.make_collate_fn_for_tasks(tasks))
-
-    multitask_compressor = models.MultiTaskMixedLatentCompressor(MeanScaleHyperprior,
-                                                                 tasks=tasks,
-                                                                 input_channels=per_task_input_channels,
-                                                                 latent_channels=LATENT_CHANNELS)
-
-    for batch in multitask_dataloader:
-        x_hats, likelihoods = multitask_compressor(batch)
-        print(len(x_hats))
-        print(multitask_compressor.get_loss(batch))
+    # multitask_dataloader = DataLoader(dataset,
+    #                                   batch_size=BATCH_SIZE,
+    #                                   collate_fn=transforms.make_collate_fn_for_tasks(tasks))
+    #
+    # multitask_compressor = models.MultiTaskMixedLatentCompressor(MeanScaleHyperprior,
+    #                                                              tasks=tasks,
+    #                                                              input_channels=per_task_input_channels,
+    #                                                              latent_channels=LATENT_CHANNELS)
+    #
+    # for batch in multitask_dataloader:
+    #     x_hats, likelihoods = multitask_compressor(batch)
+    #     print(len(x_hats))
+    #     print(multitask_compressor.get_loss(batch))
 
     single_task = "depth"
     depth_dataloader = DataLoader(dataset,
@@ -57,7 +57,8 @@ def main():
     for batch in depth_dataloader:
         x_hats, likelihoods = single_task_compressor(batch)
         print(len(x_hats))
-        print(single_task_compressor.get_loss(batch))
+        loss = single_task_compressor.get_loss(batch)
+        print(loss)
 
 
 if __name__ == "__main__":
