@@ -1,4 +1,4 @@
-from typing import List, Tuple, Dict, Union
+from typing import Tuple, Dict, Union
 
 import torch
 import torch.nn as nn
@@ -100,7 +100,7 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
         # which means that each task t_i gets: latent_channels // 2 // self.n_tasks channels
 
         # !Note! that there is no particular reason for this choice other then the automatic
-        # control of the latent size to be descrete and always equal for all tasks
+        # control of the latent size to be discrete and always equal for all tasks
         # TODO: maybe change this idk...
         t_i_channels: int = self.latent_channels // 2 // self.n_tasks
 
@@ -142,7 +142,7 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
 
         return model
 
-    def forward(self, batch) -> Tuple[Dict[str, torch.Tensor], Dict[str, torch.Tensor]]:
+    def forward_input_heads(self, batch) -> torch.Tensor:
         """
         :param: batch - expected to be of the following form
                 {
@@ -152,36 +152,65 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
                  "taskM": [torch_tensor_1_M, torch_tensor_2_M, ..., torch_tensor_B_M,
                 }
 
+        :returns: embeddings after each head stacked on the channel dimension.
+                  Shape - (B, sum(task_channels), W, H)
+        """
+        # t_is is a list of task-specific embeddings t_is = [t_1, ..., t_len(self.tasks)]
+        t_is = [self.model["input_heads"][i](batch[task]) for i, task in enumerate(self.tasks)]
+
+        # we now concatenate them at the channel dimensions to pass through the compressor backbone
+        return torch.concat(t_is, dim=1)
+
+    def forward_output_heads(self, batch) -> torch.Tensor:
+        """
+        :param: batch - expected to be of the shape (B, sum(task_channels), W, H)
+
+        :returns: Task specific predictions
+                {
+                 "task1": [torch_tensor_1_1, torch_tensor_2_1, ..., torch_tensor_B_1,
+                 "task2": [torch_tensor_1_2, torch_tensor_2_2, ..., torch_tensor_B_2,
+                  ...
+                 "taskM": [torch_tensor_1_M, torch_tensor_2_M, ..., torch_tensor_B_M,
+                }
+        """
+        x_hats = {}
+        for task_n, task in enumerate(self.tasks):
+            x_hats[task] = self.model["output_heads"][task_n](batch)
+        return x_hats
+
+    def forward(self, batch) -> Tuple[Dict[str, torch.Tensor], Dict[str, torch.Tensor]]:
+        """
+        :param: batch - expected to be of the following form
+                {
+                 "task1": [torch_tensor_1_1, torch_tensor_2_1, ..., torch_tensor_B_1],
+                 "task2": [torch_tensor_1_2, torch_tensor_2_2, ..., torch_tensor_B_2],
+                  ...
+                 "taskM": [torch_tensor_1_M, torch_tensor_2_M, ..., torch_tensor_B_M],
+                }
+
         :returns:(
                 {
-                 "task1": [torch_tensor_1_1_hat, ..., torch_tensor_B_1_hat,
-                 "task2": [torch_tensor_1_2_hat, ..., torch_tensor_B_2_hat,
+                 "task1": [torch_tensor_1_1_hat, ..., torch_tensor_B_1_hat],
+                 "task2": [torch_tensor_1_2_hat, ..., torch_tensor_B_2_hat],
                   ...
-                 "taskM": [torch_tensor_1_M_hat, ..., torch_tensor_B_M_hat,
+                 "taskM": [torch_tensor_1_M_hat, ..., torch_tensor_B_M_hat],
                 },
                 {"y": y_likelihoods, "z": z_likelihoods}
             )
         """
 
-        # t_is is a list of task-specific embeddings t_is = [t_1, ..., t_len(self.tasks)]
-        t_is = [self.model["input_heads"][i](batch[task]) for i, task in enumerate(self.tasks)]
-
-        # we now concatenate them at the channel dimensions to pass through the compressor backbone
-        t = torch.concat(t_is, dim=1)
+        stacked_t = self.forward_input_heads(batch)
 
         # now pass through the main compressor network
-        t_preds = self.model["compressor_network"](t)
+        stacked_t_preds = self.model["compressor_network"](stacked_t)
 
-        t_hat = t_preds["x_hat"]
+        stacked_t_hat = stacked_t_preds["x_hat"]
+        stacked_t_likelihoods = stacked_t_preds["likelihoods"]  # {"y": y_likelihoods, "z": z_likelihoods}
 
-        # {"y": y_likelihoods, "z": z_likelihoods}
-        likelihoods = t_preds["likelihoods"]
+        # {"task1": [torch_tensor_1_1_hat, ..., torch_tensor_B_1_hat], ... }
+        x_hats = self.forward_output_heads(stacked_t_hat)
 
-        x_hats = {}
-        for task_n, task in enumerate(self.tasks):
-            x_hats[task] = self.model["output_heads"][task_n](t_hat)
-
-        return x_hats, likelihoods
+        return x_hats, stacked_t_likelihoods
 
     def reconstruction_loss(self, x, x_hat, loss_type: str = "mse") -> torch.Tensor:
         """
@@ -244,16 +273,12 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         loss = self.get_loss(batch)
-        self.log("train_loss", loss)
+        self.log("train_loss", loss, on_epoch=True, sync_dist=True)
         return loss
 
     def validation_step(self, batch, batch_idx):
         loss = self.get_loss(batch)
-        self.log("val_loss", loss)
-
-    def test_step(self, batch, batch_idx):
-        loss = self.get_loss(batch)
-        self.log("test_loss", loss)
+        self.log("val_loss", loss, on_epoch=True, sync_dist=True)
 
     def get_main_parameters(self):
         return set(p for n, p in self.model.named_parameters() if not n.endswith(".quantiles"))
@@ -265,15 +290,18 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
         main_optimizer = torch.optim.Adam(self.get_main_parameters(), lr=1e-3)
         auxilary_optimizer = torch.optim.Adam(self.get_auxilary_parameters(), lr=1e-3)
 
-        return {"main_optimizer": main_optimizer,
+        return {"optimizer": main_optimizer,
                 "auxilary_optimizer": auxilary_optimizer,
                 "monitor": "val_loss"}
 
     def compress(self, batch):
-        pass
+        x = self.forward_input_heads(batch)
+        ans = self.model["compressor_network"].compress(x)  # {"strings": [y_strings, z_strings],"shape": z.size()[-2:]}
+        return ans
 
-    def decompress(self, batch):
-        pass
+    def decompress(self, strings, shape):
+        x_hat = self.model["compressor_network"].decompress(strings, shape)
+        return self.forward_output_heads(x_hat)
 
 
 class SingleTaskCompressor(MultiTaskMixedLatentCompressor):
@@ -313,13 +341,16 @@ class SingleTaskCompressor(MultiTaskMixedLatentCompressor):
     def get_loss(self, batch, lmbd=0.5):
         x_hat, likelihoods = self.forward(batch)
 
+        x_hat = x_hat[self.task]
         reconstruction_loss = self.reconstruction_loss(batch, x_hat, "mse")
+
+        num_pixels = self.__get_number_of_pixels(x_hat)
         compression_loss = self.compression_loss(likelihoods=likelihoods,
-                                                 num_pixels=self.__get_number_of_pixels(x_hat))
+                                                 num_pixels=num_pixels)
 
         return reconstruction_loss + lmbd * compression_loss
 
-    def forward(self, batch) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
+    def forward_input_heads(self, batch) -> torch.Tensor:
         """
         :param: batch - expected to be of the following form:
                 [torch_tensor_1_1, torch_tensor_2_1, ..., torch_tensor_B_1]
@@ -328,6 +359,6 @@ class SingleTaskCompressor(MultiTaskMixedLatentCompressor):
         """
         batch_task_tensor = dict()
         batch_task_tensor[self.task] = batch
-        x_hats, likelihoods = super().forward(batch_task_tensor)
+        stacked_task_embd = super().forward_input_heads(batch_task_tensor)
 
-        return x_hats[self.task], likelihoods
+        return stacked_task_embd

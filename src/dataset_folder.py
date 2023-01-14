@@ -60,7 +60,6 @@ def make_dataset(
     for target_class in sorted(class_to_idx.keys()):
         class_index = class_to_idx[target_class]
         target_dir = os.path.join(directory, target_class)
-        print(target_dir)
         if not os.path.isdir(target_dir):
             continue
         for root, _, fnames in sorted(os.walk(target_dir, followlinks=True)):

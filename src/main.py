@@ -10,16 +10,17 @@ from dataset_folder import MultiTaskImageFolder
 
 IMAGENET_ROOT = "../data/imagenet_multitask/"
 
-BATCH_SIZE = 4
+BATCH_SIZE = 3
 
 LATENT_CHANNELS = 90
 
 
 def main():
-    tasks = ("rgb", "depth", "semseg")
     task_input_channels = {"rgb": 3,
                            "depth": 1,
                            "semseg": 1}
+
+    tasks = tuple(task_input_channels.keys())
     per_task_input_channels = tuple(task_input_channels.values())
 
     transform: dict = transforms.make_transforms(tasks)
@@ -30,10 +31,10 @@ def main():
                                    tasks=tasks,
                                    transform=transform,
                                    max_images=100)
-
+    #
     # multitask_dataloader = DataLoader(dataset,
     #                                   batch_size=BATCH_SIZE,
-    #                                   collate_fn=transforms.make_collate_fn_for_tasks(tasks))
+    #                                   collate_fn=transforms.make_collate_fn(tasks))
     #
     # multitask_compressor = models.MultiTaskMixedLatentCompressor(MeanScaleHyperprior,
     #                                                              tasks=tasks,
@@ -48,17 +49,26 @@ def main():
     single_task = "depth"
     depth_dataloader = DataLoader(dataset,
                                   batch_size=BATCH_SIZE,
-                                  collate_fn=transforms.make_collate_fn_for_tasks(single_task))
+                                  collate_fn=transforms.make_collate_fn(single_task))
 
     single_task_compressor = models.SingleTaskCompressor(MeanScaleHyperprior,
                                                          task=single_task,
                                                          input_channels=task_input_channels[single_task],
                                                          latent_channels=LATENT_CHANNELS)
     for batch in depth_dataloader:
+        # x_hats, likelihoods = single_task_compressor(batch)
+        # print(len(x_hats))
+        # loss = single_task_compressor.get_loss(batch)
+
+        single_task_compressor.eval()
         x_hats, likelihoods = single_task_compressor(batch)
-        print(len(x_hats))
-        loss = single_task_compressor.get_loss(batch)
-        print(loss)
+
+        # print(loss)
+        # compressed_dict = single_task_compressor.compress(batch)
+        # # print(len(x_hats_decompressed))
+        # x_hats_decompressed = single_task_compressor.decompress(strings=compressed_dict["strings"],
+        #                                                         shape=compressed_dict["shape"])
+        # # print(len(x_hats_decompressed))
 
 
 if __name__ == "__main__":

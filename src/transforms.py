@@ -31,11 +31,12 @@ def make_transforms(tasks):
     return transforms_dict
 
 
-def make_collate_fn_for_tasks(tasks: Union[List[str], str]) -> Callable:
+def make_collate_fn(tasks: Union[List[str], str]) -> Callable:
     """
     :param tasks: either a list or a single task
     :return: function which preprocesses a bach for multiple tasks or for a single one
     """
+    global my_collate_fn
 
     def my_collate_fn(list_of_inputs: List[Tuple[Dict[str, torch.Tensor], int]]) -> Dict[str, torch.Tensor]:
         """
@@ -46,9 +47,9 @@ def make_collate_fn_for_tasks(tasks: Union[List[str], str]) -> Callable:
         into an output *dictionary* of M keys with B values each, so that we
         have per-task batches.
 
-        Basically - its merging B dictionaries' values by keys
+        We want to turn
 
-        We want to turn this input:
+        (1) this type of input:
         [
             ({
             "task1": torch_tensor_1_1,
@@ -68,17 +69,16 @@ def make_collate_fn_for_tasks(tasks: Union[List[str], str]) -> Callable:
             class_numberN),
         ]
 
-        Into this output if there are multiple tasks:
+        (2) or this type of input:
+        ([torch_tensor_1, torch_tensor_2, ..., torch_tensor_B], class_number1)
+
+        Into this type of output:
         {
             "task1": [torch_tensor_1_1, torch_tensor_2_1, ..., torch_tensor_B_1],
             "task2": [torch_tensor_1_2, torch_tensor_2_2, ..., torch_tensor_B_2],
              ...
             "taskM": [torch_tensor_1_M, torch_tensor_2_M, ..., torch_tensor_B_M]
         }
-
-        or if into this output if there is a single task:
-
-        [torch_tensor_1_1, torch_tensor_2_1, ..., torch_tensor_B_1],
         """
         single_task = type(tasks) == str
 
@@ -88,11 +88,21 @@ def make_collate_fn_for_tasks(tasks: Union[List[str], str]) -> Callable:
 
         # to all the leetcode bros: im so sorry for these loops :c
         for task in task_list:
-            for input_dict in list_of_inputs:
-                ans[task].append(input_dict[0][task])
+            for input_item in list_of_inputs:
+
+                item_type = type(input_item[0])
+
+                # if dict, then the input was in form (1)
+                if item_type == dict:
+                    data_item = input_item[0][task]
+                elif item_type == torch.Tensor:
+                    data_item = input_item[0]
+                else:
+                    raise NotImplementedError(f"Type {item_type} was unexpected")
+
+                ans[task].append(data_item)
 
             ans[task] = torch.stack(ans[task])
 
         return ans if not single_task else ans[tasks]
-
     return my_collate_fn
