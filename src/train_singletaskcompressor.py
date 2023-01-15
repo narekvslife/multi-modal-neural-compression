@@ -90,10 +90,12 @@ def main():
 
     dataset_train, dataloader_train = get_dataloader(dataset_name=DATASET,
                                                      batch_size=BATCH_SIZE,
-                                                     num_workers=4, is_train=True)
+                                                     num_workers=1,
+                                                     is_train=True)
     dataset_val, dataloader_val = get_dataloader(dataset_name=DATASET,
                                                  batch_size=BATCH_SIZE,
-                                                 num_workers=4, is_train=False)
+                                                 num_workers=1,
+                                                 is_train=False)
 
     single_task_compressor = models.SingleTaskCompressor(MeanScaleHyperprior,
                                                          task=SINGLE_TASK,
@@ -103,8 +105,10 @@ def main():
     trainer = pl.Trainer(
         accelerator="cpu",
         devices=1,
-        max_epochs=100,
-        # logger=set_wandb_logger()
+        max_epochs=1000,
+        check_val_every_n_epoch=50,
+        enable_progress_bar=True,
+        logger=set_wandb_logger(),
     )
 
     trainer.fit(model=single_task_compressor,

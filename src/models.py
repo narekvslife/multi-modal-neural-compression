@@ -1,9 +1,14 @@
-from typing import Tuple, Dict, Union
+from typing import Tuple, Dict, Union, List
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
 import pytorch_lightning as pl
+from pytorch_lightning.utilities.types import EPOCH_OUTPUT
+
+from pytorch_msssim import ms_ssim
+from torchmetrics.functional.image.psnr import peak_signal_noise_ratio
 
 from compressai.models.utils import conv, deconv
 from compressai.layers import GDN
@@ -25,6 +30,8 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
             tasks: Tuple[str],
             input_channels: Tuple[int],
             latent_channels: int,
+            lmbda: float = 0.5,
+            n_epoch_log: int = 50,
             **kwargs
     ):
         """
@@ -32,6 +39,8 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
         :param: tasks - list of task names
         :param: input_channels - tuple with the number of channels of each task
         :param: latent_channels - number of channels in the latent space
+        :param: lmbda - multiplier of the compression loss in the total loss
+        :param: n_epoch_log - log additional metrics/images each n_epoch_log epochs
         """
         super().__init__()
         self.compression_model_class = compression_model_class
@@ -39,10 +48,13 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
         self.tasks = tasks
         self.n_tasks = len(self.tasks)
         self.input_channels = input_channels
-
         assert self.n_tasks == len(self.input_channels)
 
         self.latent_channels = latent_channels
+
+        self.lmbda = lmbda
+
+        self.n_epoch_log = n_epoch_log
         self.model: nn.ModuleDict = self.__build_model(**kwargs)
 
     def __build_heads(self,
@@ -217,19 +229,11 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
         Given a batch of images, this function returns the reconstruction loss
 
         :param: batch - expected to be of the following form:
-                {
-                 "task1": [torch_tensor_1_1, torch_tensor_2_1, ..., torch_tensor_B_1,
-                 "task2": [torch_tensor_1_2, torch_tensor_2_2, ..., torch_tensor_B_2,
-                  ...
-                 "taskM": [torch_tensor_1_M, torch_tensor_2_M, ..., torch_tensor_B_M,
-                }
+                [torch_tensor_1_1, torch_tensor_2_1, ..., torch_tensor_B_1]
+
         :param: reconstruction_loss_type - which loss function to use*
 
-        *Note that here we assume using the same loss for all the tasks.
-         For current implementation, where all the input tasks are images of sort
-         this makes complete sense.
-
-         :returns:
+         :returns: the reconstruction loss
         """
 
         if loss_type == "mse":
@@ -244,6 +248,29 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
 
         return loss
 
+    #TODO: the functions below can/should be merged
+    def multitask_reconstruction_loss(self, x, x_hats):
+        reconstruction_loss = 0
+        for task in self.tasks:
+            reconstruction_loss += self.reconstruction_loss(x=x[task],
+                                                            x_hat=x_hats[task],
+                                                            loss_type="mse")
+        return reconstruction_loss / self.n_tasks
+
+    def multitask_psnr(self, x, x_hats):
+        psnr = 0
+        for task in self.tasks:
+            psnr += peak_signal_noise_ratio(x_hats[task], x, data_range=1.0)
+
+        return psnr / self.n_tasks
+
+    def multitask_ms_ssim(self, x, x_hats):
+        msssim = 0
+        for task in self.tasks:
+            msssim += ms_ssim(x_hats[task], x, data_range=1.0)
+
+        return msssim / self.n_tasks
+
     def __get_number_of_pixels(self, x_hats) -> int:
         B, _, H, W = torch.stack([torch.tensor(x_hats[task].shape) for task in self.tasks]).sum(0)
         return B * H * W
@@ -255,30 +282,88 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
 
         return compression_loss
 
-    def get_loss(self, batch, lmbd=0.5):
+    def training_step(self, batch, batch_idx):
         x_hats, likelihoods = self.forward(batch)
 
-        reconstruction_loss = 0
-        compression_loss = 0
+        rec_loss = self.multitask_reconstruction_loss(x=batch, x_hats=x_hats)
 
-        for task in self.tasks:
-            reconstruction_loss += self.reconstruction_loss(x=batch[task],
-                                                            x_hat=x_hats[task],
-                                                            loss_type="mse")
+        compression_loss = self.compression_loss(likelihoods=likelihoods,
+                                                 num_pixels=self.__get_number_of_pixels(x_hats))
 
-        compression_loss += self.compression_loss(likelihoods=likelihoods,
-                                                  num_pixels=self.__get_number_of_pixels(x_hats))
+        loss = rec_loss + self.lmbda * compression_loss
 
-        return reconstruction_loss + lmbd * compression_loss
+        log_dict = {
+            "train/rec_loss": rec_loss,
+            "train/compression_loss": compression_loss,
+            "train/loss": loss,
+        }
+        self.log_dict(log_dict, on_epoch=True, prog_bar=True)
 
-    def training_step(self, batch, batch_idx):
-        loss = self.get_loss(batch)
-        self.log("train_loss", loss, on_epoch=True, sync_dist=True)
-        return loss
+        out_dict = {"loss": loss}
+        if self.current_epoch % self.n_epoch_log == 0:
+            out_dict["psnr"] = self.multitask_psnr(x=batch, x_hats=x_hats)
+            out_dict["ms_ssim"] = self.multitask_ms_ssim(x=batch, x_hats=x_hats)
+
+        return out_dict
+
+    def training_epoch_end(self, outputs: EPOCH_OUTPUT) -> None:
+
+        if self.current_epoch % self.n_epoch_log == 0:
+            psnr = 0
+            msssim = 0
+            for output in outputs:
+                psnr += output["psnr"]
+                msssim += output["ms_ssim"]
+
+            log_dict = {
+                "train/psnr": psnr / len(outputs),
+                "train/ms_ssim": msssim / len(outputs),
+            }
+            self.log_dict(log_dict, prog_bar=True)
+
+        return None
 
     def validation_step(self, batch, batch_idx):
-        loss = self.get_loss(batch)
-        self.log("val_loss", loss, on_epoch=True, sync_dist=True)
+        x_hats, likelihoods = self.forward(batch)
+
+        rec_loss = self.multitask_reconstruction_loss(x=batch, x_hats=x_hats)
+
+        compression_loss = self.compression_loss(likelihoods=likelihoods,
+                                                 num_pixels=self.__get_number_of_pixels(x_hats))
+
+        loss = rec_loss + self.lmbda * compression_loss
+
+        log_dict = {
+            "val/rec_loss": rec_loss,
+            "val/compression_loss": compression_loss,
+            "val/loss": loss,
+        }
+
+        self.log_dict(log_dict, on_epoch=True, prog_bar=True)
+
+        out_dict = {"loss": loss}
+        if self.current_epoch % self.n_epoch_log == 0:
+            out_dict["psnr"] = self.multitask_psnr(x=batch, x_hats=x_hats)
+            out_dict["ms_ssim"] = self.multitask_ms_ssim(x=batch, x_hats=x_hats)
+
+        return out_dict
+
+    def validation_epoch_end(self, outputs: Union[EPOCH_OUTPUT, List[EPOCH_OUTPUT]]) -> None:
+
+        if self.current_epoch % self.n_epoch_log == 0:
+            psnr = 0
+            msssim = 0
+            for output in outputs:
+                psnr += output["psnr"]
+                msssim += output["ms_ssim"]
+
+            log_dict = {
+                "val/psnr": psnr / len(outputs),
+                "val/ms_ssim": msssim / len(outputs),
+            }
+            self.log_dict(log_dict, prog_bar=True)
+
+        return None
 
     def get_main_parameters(self):
         return set(p for n, p in self.model.named_parameters() if not n.endswith(".quantiles"))
@@ -287,12 +372,12 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
         return set(p for n, p in self.model.named_parameters() if n.endswith(".quantiles"))
 
     def configure_optimizers(self):
-        main_optimizer = torch.optim.Adam(self.get_main_parameters(), lr=1e-3)
+        main_optimizer = torch.optim.Adam(self.get_main_parameters(), lr=1e-4)
         auxilary_optimizer = torch.optim.Adam(self.get_auxilary_parameters(), lr=1e-3)
 
         return {"optimizer": main_optimizer,
                 "auxilary_optimizer": auxilary_optimizer,
-                "monitor": "val_loss"}
+                "monitor": ["train_loss", "val_loss"]}
 
     def compress(self, batch):
         x = self.forward_input_heads(batch)
@@ -318,6 +403,7 @@ class SingleTaskCompressor(MultiTaskMixedLatentCompressor):
             task: str,
             input_channels: int,
             latent_channels: int,
+            lmbda: float = 0.5,
             **kwargs
     ):
         """
@@ -330,6 +416,7 @@ class SingleTaskCompressor(MultiTaskMixedLatentCompressor):
                          tasks=(task,),
                          input_channels=(input_channels, ),
                          latent_channels=latent_channels,
+                         lmbda=lmbda,
                          **kwargs)
 
         self.task = task
@@ -338,17 +425,16 @@ class SingleTaskCompressor(MultiTaskMixedLatentCompressor):
         B, _, H, W = x.shape
         return B * H * W
 
-    def get_loss(self, batch, lmbd=0.5):
-        x_hat, likelihoods = self.forward(batch)
+    def multitask_reconstruction_loss(self, x, x_hats):
+        return super().reconstruction_loss(x, x_hats[self.task])
 
-        x_hat = x_hat[self.task]
-        reconstruction_loss = self.reconstruction_loss(batch, x_hat, "mse")
+    def multitask_psnr(self, x, x_hats):
+        return peak_signal_noise_ratio(preds=x_hats[self.task],
+                                       target=x,
+                                       data_range=1)
 
-        num_pixels = self.__get_number_of_pixels(x_hat)
-        compression_loss = self.compression_loss(likelihoods=likelihoods,
-                                                 num_pixels=num_pixels)
-
-        return reconstruction_loss + lmbd * compression_loss
+    def multitask_ms_ssim(self, x, x_hats):
+        return ms_ssim(x, x_hats[self.task])
 
     def forward_input_heads(self, batch) -> torch.Tensor:
         """
