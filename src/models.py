@@ -261,14 +261,14 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
     def multitask_psnr(self, x, x_hats):
         psnr = 0
         for task in self.tasks:
-            psnr += peak_signal_noise_ratio(x_hats[task], x, data_range=1.0)
+            psnr += peak_signal_noise_ratio(x_hats[task] * 255, x * 255, data_range=255)
 
         return psnr / self.n_tasks
 
     def multitask_ms_ssim(self, x, x_hats):
         msssim = 0
         for task in self.tasks:
-            msssim += ms_ssim(x_hats[task], x, data_range=1.0)
+            msssim += ms_ssim(x_hats[task] * 255, x * 255, data_range=2550)
 
         return msssim / self.n_tasks
 
@@ -298,7 +298,7 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
             "train/compression_loss": compression_loss,
             "train/loss": loss,
         }
-        self.log_dict(log_dict, on_epoch=True, prog_bar=True)
+        self.log_dict(log_dict, on_step=False, on_epoch=True, prog_bar=True)
 
         out_dict = {"loss": loss}
         if self.current_epoch % self.n_epoch_log == 0:
@@ -339,31 +339,26 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
             "val/compression_loss": compression_loss,
             "val/loss": loss,
         }
-
-        self.log_dict(log_dict, on_epoch=True, prog_bar=True)
+        self.log_dict(log_dict, on_step=False, on_epoch=True, prog_bar=True)
 
         out_dict = {"loss": loss}
-        if self.current_epoch % self.n_epoch_log == 0:
-            out_dict["psnr"] = self.multitask_psnr(x=batch, x_hats=x_hats)
-            out_dict["ms_ssim"] = self.multitask_ms_ssim(x=batch, x_hats=x_hats)
+        out_dict["psnr"] = self.multitask_psnr(x=batch, x_hats=x_hats)
+        out_dict["ms_ssim"] = self.multitask_ms_ssim(x=batch, x_hats=x_hats)
 
         return out_dict
 
     def validation_epoch_end(self, outputs: Union[EPOCH_OUTPUT, List[EPOCH_OUTPUT]]) -> None:
+        psnr = 0
+        msssim = 0
+        for output in outputs:
+            psnr += output["psnr"]
+            msssim += output["ms_ssim"]
 
-        if self.current_epoch % self.n_epoch_log == 0:
-            psnr = 0
-            msssim = 0
-            for output in outputs:
-                psnr += output["psnr"]
-                msssim += output["ms_ssim"]
-
-            log_dict = {
-                "val/psnr": psnr / len(outputs),
-                "val/ms_ssim": msssim / len(outputs),
-            }
-            self.log_dict(log_dict, prog_bar=True)
-
+        log_dict = {
+            "val/psnr": psnr / len(outputs),
+            "val/ms_ssim": msssim / len(outputs),
+        }
+        self.log_dict(log_dict, prog_bar=True)
         return None
 
     def get_main_parameters(self):
@@ -430,12 +425,12 @@ class SingleTaskCompressor(MultiTaskMixedLatentCompressor):
         return super().reconstruction_loss(x, x_hats[self.task])
 
     def multitask_psnr(self, x, x_hats):
-        return peak_signal_noise_ratio(preds=x_hats[self.task],
-                                       target=x,
-                                       data_range=1)
+        return peak_signal_noise_ratio(preds=x_hats[self.task] * 255,
+                                       target=x * 255,
+                                       data_range=255)
 
     def multitask_ms_ssim(self, x, x_hats):
-        return ms_ssim(x, x_hats[self.task])
+        return ms_ssim(x * 255, x_hats[self.task] * 255, data_range=255)
 
     def forward_input_heads(self, batch) -> torch.Tensor:
         """

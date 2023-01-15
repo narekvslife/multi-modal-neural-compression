@@ -94,6 +94,7 @@ def main():
                                                      batch_size=BATCH_SIZE,
                                                      num_workers=1,
                                                      is_train=True)
+
     # dataset_val, dataloader_val = get_dataloader(dataset_name=DATASET,
     #                                              batch_size=BATCH_SIZE,
     #                                              num_workers=1,
@@ -108,11 +109,10 @@ def main():
                                                                               input_channels=task_input_channels[SINGLE_TASK],
                                                                               latent_channels=LATENT_CHANNELS)
 
-    for batch in dataloader_train:
-        x_hats, likelihoods = single_task_compressor(batch)
-        x_hats = x_hats[SINGLE_TASK]
-
-        show_images([b[0].detach().numpy() for b in batch] + [b[0].detach().numpy() for b in x_hats])
+    batch = next(iter(dataloader_train))
+    x_hats, likelihoods = single_task_compressor(batch)
+    x_hats = x_hats[SINGLE_TASK]
+    show_images([b[0].detach().numpy() for b in batch] + [b[0].detach().numpy() for b in x_hats])
 
 
 if __name__ == "__main__":

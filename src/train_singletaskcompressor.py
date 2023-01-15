@@ -1,4 +1,3 @@
-import os
 from typing import Tuple
 
 import torch
@@ -9,13 +8,13 @@ import torchvision
 from torchvision.transforms import transforms
 
 import pytorch_lightning as pl
-from pytorch_lightning.loggers import WandbLogger
 
 from compressai.models import MeanScaleHyperprior
 
+import utils
 import models
+from callbacks import LogPredictionSamplesCallback
 from transforms import make_collate_fn
-
 
 IMAGENET_ROOT = "../data/imagenet_multitask/"
 
@@ -44,12 +43,6 @@ DATASET = FASHION_MNIST
 
 WANDB_PROJECT_NAME = "vilab-compression"
 WANDB_RUN_NAME = f"S-{DATASET}-{SINGLE_TASK}"
-
-
-def set_wandb_logger():
-    return WandbLogger(name=WANDB_RUN_NAME,
-                       project=WANDB_PROJECT_NAME,
-                       log_model="all")
 
 
 def get_dataloader(dataset_name: str, batch_size: int, num_workers: int, is_train=False) -> Tuple[Dataset, DataLoader]:
@@ -82,6 +75,8 @@ def get_dataloader(dataset_name: str, batch_size: int, num_workers: int, is_trai
 def main():
     manual_seed(21)
 
+    utils.set_wandb_logger(WANDB_RUN_NAME, WANDB_PROJECT_NAME)
+
     task_input_channels = {"rgb": 3,
                            "mono": 1,
                            "depth": 1,
@@ -107,7 +102,8 @@ def main():
         max_epochs=1000,
         check_val_every_n_epoch=50,
         enable_progress_bar=True,
-        logger=set_wandb_logger(),
+        logger=utils.get_wandb_logger(),
+        callbacks=[LogPredictionSamplesCallback()]
     )
 
     trainer.fit(model=single_task_compressor,
