@@ -5,7 +5,7 @@ import torch
 from torchvision import transforms
 import torchvision.transforms.functional as TF
 
-from data_constants import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD
+from constants import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD
 
 
 def normalize_uint16(image):

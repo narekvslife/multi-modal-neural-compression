@@ -43,6 +43,7 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
         :param: n_epoch_log - log additional metrics/images each n_epoch_log epochs
         """
         super().__init__()
+        self.save_hyperparameters()
         self.compression_model_class = compression_model_class
 
         self.tasks = tasks

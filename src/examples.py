@@ -1,17 +1,17 @@
-import os
 from typing import Tuple
 
 import torch
+from matplotlib import pyplot as plt
+
 from torch.utils.data import DataLoader, Dataset
 from torch.random import manual_seed
 
 import torchvision
 from torchvision.transforms import transforms
 
-import pytorch_lightning as pl
-from pytorch_lightning.loggers import WandbLogger
-
 from compressai.models import MeanScaleHyperprior
+
+import wandb
 
 import models
 from transforms import make_collate_fn
@@ -46,10 +46,13 @@ WANDB_PROJECT_NAME = "vilab-compression"
 WANDB_RUN_NAME = f"S-{DATASET}-{SINGLE_TASK}"
 
 
-def set_wandb_logger():
-    return WandbLogger(name=WANDB_RUN_NAME,
-                       project=WANDB_PROJECT_NAME,
-                       log_model="all")
+def show_images(images: list):
+    fig, axs = plt.subplots(1, len(images))
+
+    for i in range(len(images)):
+        axs[i].imshow(images[i])
+
+    plt.show()
 
 
 def get_dataloader(dataset_name: str, batch_size: int, num_workers: int, is_train=False) -> Tuple[Dataset, DataLoader]:
@@ -91,28 +94,25 @@ def main():
                                                      batch_size=BATCH_SIZE,
                                                      num_workers=1,
                                                      is_train=True)
-    dataset_val, dataloader_val = get_dataloader(dataset_name=DATASET,
-                                                 batch_size=BATCH_SIZE,
-                                                 num_workers=1,
-                                                 is_train=False)
+    # dataset_val, dataloader_val = get_dataloader(dataset_name=DATASET,
+    #                                              batch_size=BATCH_SIZE,
+    #                                              num_workers=1,
+    #                                              is_train=False)
 
-    single_task_compressor = models.SingleTaskCompressor(MeanScaleHyperprior,
-                                                         task=SINGLE_TASK,
-                                                         input_channels=task_input_channels[SINGLE_TASK],
-                                                         latent_channels=LATENT_CHANNELS)
+    # run = wandb.init()
+    # artifact = run.use_artifact('narekvslife/vilab-compression/model-w99zdk8g:v19', type='model')
+    # artifact_dir = artifact.download()
+    single_task_compressor = models.SingleTaskCompressor.load_from_checkpoint("artifacts/model-w99zdk8g:v19/model.ckpt",
+                                                                              compression_model_class=MeanScaleHyperprior,
+                                                                              task=SINGLE_TASK,
+                                                                              input_channels=task_input_channels[SINGLE_TASK],
+                                                                              latent_channels=LATENT_CHANNELS)
 
-    trainer = pl.Trainer(
-        accelerator="cpu",
-        devices=1,
-        max_epochs=1000,
-        check_val_every_n_epoch=50,
-        enable_progress_bar=True,
-        logger=set_wandb_logger(),
-    )
+    for batch in dataloader_train:
+        x_hats, likelihoods = single_task_compressor(batch)
+        x_hats = x_hats[SINGLE_TASK]
 
-    trainer.fit(model=single_task_compressor,
-                train_dataloaders=dataloader_train,
-                val_dataloaders=dataloader_val)
+        show_images([b[0].detach().numpy() for b in batch] + [b[0].detach().numpy() for b in x_hats])
 
 
 if __name__ == "__main__":
