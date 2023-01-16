@@ -44,3 +44,18 @@ NYU_TRAIN_PATH = 'ADD_DATA_PATH_HERE'
 NYU_TEST_PATH = 'ADD_DATA_PATH_HERE'
 
 TASKONOMY_PATH = 'ADD_DATA_PATH_HERE'
+
+# new
+
+MNIST = "mnist"
+FASHION_MNIST = "fashion-mnist"
+CLEVR = "clevr"
+
+DATASET = FASHION_MNIST
+
+SINGLE_TASK = "mono"
+
+WANDB_RUN_NAME = f"S-{DATASET}-{SINGLE_TASK}-full-pretrained"
+
+WANDB_PROJECT_NAME = "vilab-compression"
+

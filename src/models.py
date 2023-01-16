@@ -5,13 +5,14 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 import pytorch_lightning as pl
-from pytorch_lightning.utilities.types import EPOCH_OUTPUT
+from compressai.models import ScaleHyperprior
 
 from pytorch_msssim import ms_ssim
 from torchmetrics.functional.image.psnr import peak_signal_noise_ratio
 
-from compressai.models.utils import conv, deconv
 from compressai.layers import GDN
+from compressai.zoo import bmshj2018_hyperprior
+from compressai.models.utils import conv, deconv
 
 
 class MultiTaskMixedLatentCompressor(pl.LightningModule):
@@ -32,6 +33,8 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
             latent_channels: int,
             lmbda: float = 0.5,
             n_epoch_log: int = 50,
+            pretrained: bool = False,
+            quality: int = 4,
             **kwargs
     ):
         """
@@ -56,7 +59,16 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
         self.lmbda = lmbda
 
         self.n_epoch_log = n_epoch_log
-        self.model: nn.ModuleDict = self.__build_model(**kwargs)
+
+        self.pretrained = pretrained
+
+        self.quality = quality
+
+        if self.pretrained:
+            print("Note that pretrained models have their own (fixed) number of latent channels independent of specified M")
+
+        self.kwargs = kwargs
+        self.model: nn.ModuleDict = self._build_model()
 
     def __build_heads(self,
                       input_channels: Union[Tuple[int], int],
@@ -97,7 +109,41 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
 
         return nn.ModuleList(list_of_modules)
 
-    def __build_model(self, **kwargs) -> nn.ModuleDict:
+    def __get_compression_network(self, N: int, M: int) -> nn.Module:
+        """
+
+        :param N: - number of input channels to the compression model
+        :param M: - number of latent channels that later will be compressed
+        :return:
+        """
+        if self.pretrained:
+
+            if self.compression_model_class == ScaleHyperprior:
+                model = bmshj2018_hyperprior(self.quality,
+                                             metric='mse',
+                                             pretrained=True,
+                                             progress=True,
+                                             **self.kwargs)
+            else:
+                raise ValueError(f"No pretrained model available of class {self.compression_model_class}")
+
+        else:
+            model = self.compression_model_class(N=N,
+                                                 M=M,
+                                                 **self.kwargs)
+
+        if M != model.M:
+            print(f"Note that the pretrained {self.compression_model_class} has a fixed latent size M={model.M}, "
+                  f"which is different from the specified M={M}")
+
+        # this is the part that i have to deal with because in the compressai models
+        # the default input and output dimensions is a hardcoded 3, rather than N!
+        model.g_a[0] = conv(N, model.N)
+        model.g_s[-1] = deconv(model.N, N)
+
+        return model
+
+    def _build_model(self) -> nn.ModuleDict:
         """
         x1 -> task_enc1 -> t_1 ->  ↓                                      -> task_dec1 -> x1_hat
 
@@ -124,34 +170,10 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
         total_task_channels = t_i_channels * self.n_tasks
 
         # these task-specific are stacked and passed to the default compressai model
-        N = total_task_channels
-        M = self.latent_channels
-        model["compressor_network"] = self.compression_model_class(N=N,
-                                                                   M=M,
-                                                                   **kwargs)
-        # this is the part that i have to deal with because in the compressai
-        # the default input and output dimensions is a hardcoded 3, rather than N!
-        model["compressor_network"].g_a = nn.Sequential(
-            conv(N, N),
-            GDN(N),
-            conv(N, N),
-            GDN(N),
-            conv(N, N),
-            GDN(N),
-            conv(N, M),
-        )
-        model["compressor_network"].g_s = nn.Sequential(
-            deconv(M, N),
-            GDN(N, inverse=True),
-            deconv(N, N),
-            GDN(N, inverse=True),
-            deconv(N, N),
-            GDN(N, inverse=True),
-            deconv(N, N),
-        )
+        model["compressor_network"] = self.__get_compression_network(N=total_task_channels, M=self.latent_channels)
 
         # now that mixed representations should be passed to task-specific output heads
-        model["output_heads"] = self.__build_heads(N, self.input_channels, is_deconv=True)
+        model["output_heads"] = self.__build_heads(total_task_channels, self.input_channels, is_deconv=True)
 
         return model
 
@@ -249,7 +271,7 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
 
         return loss
 
-    #TODO: the functions below can/should be merged
+    # TODO: the loss/metric functions below can/should be merged
     def multitask_reconstruction_loss(self, x, x_hats):
         reconstruction_loss = 0
         for task in self.tasks:
@@ -297,32 +319,13 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
             "train/rec_loss": rec_loss,
             "train/compression_loss": compression_loss,
             "train/loss": loss,
+            "train/psnr": self.multitask_psnr(x=batch, x_hats=x_hats),
+            "train/ms-ssim": self.multitask_ms_ssim(x=batch, x_hats=x_hats)
         }
-        self.log_dict(log_dict, on_step=False, on_epoch=True, prog_bar=True)
 
-        out_dict = {"loss": loss}
-        if self.current_epoch % self.n_epoch_log == 0:
-            out_dict["psnr"] = self.multitask_psnr(x=batch, x_hats=x_hats)
-            out_dict["ms_ssim"] = self.multitask_ms_ssim(x=batch, x_hats=x_hats)
+        self.log_dict(log_dict, on_step=True, sync_dist=True)
 
-        return out_dict
-
-    def training_epoch_end(self, outputs: EPOCH_OUTPUT) -> None:
-
-        if self.current_epoch % self.n_epoch_log == 0:
-            psnr = 0
-            msssim = 0
-            for output in outputs:
-                psnr += output["psnr"]
-                msssim += output["ms_ssim"]
-
-            log_dict = {
-                "train/psnr": psnr / len(outputs),
-                "train/ms_ssim": msssim / len(outputs),
-            }
-            self.log_dict(log_dict, prog_bar=True)
-
-        return None
+        return loss
 
     def validation_step(self, batch, batch_idx):
         x_hats, likelihoods = self.forward(batch)
@@ -338,28 +341,12 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
             "val/rec_loss": rec_loss,
             "val/compression_loss": compression_loss,
             "val/loss": loss,
+            "val/psnr": self.multitask_psnr(x=batch, x_hats=x_hats),
+            "val/ms_ssim": self.multitask_ms_ssim(x=batch, x_hats=x_hats)
         }
-        self.log_dict(log_dict, on_step=False, on_epoch=True, prog_bar=True)
 
-        out_dict = {"loss": loss}
-        out_dict["psnr"] = self.multitask_psnr(x=batch, x_hats=x_hats)
-        out_dict["ms_ssim"] = self.multitask_ms_ssim(x=batch, x_hats=x_hats)
-
-        return out_dict
-
-    def validation_epoch_end(self, outputs: Union[EPOCH_OUTPUT, List[EPOCH_OUTPUT]]) -> None:
-        psnr = 0
-        msssim = 0
-        for output in outputs:
-            psnr += output["psnr"]
-            msssim += output["ms_ssim"]
-
-        log_dict = {
-            "val/psnr": psnr / len(outputs),
-            "val/ms_ssim": msssim / len(outputs),
-        }
-        self.log_dict(log_dict, prog_bar=True)
-        return None
+        self.log_dict(log_dict, on_step=True, sync_dist=True)
+        return loss
 
     def get_main_parameters(self):
         return set(p for n, p in self.model.named_parameters() if not n.endswith(".quantiles"))
@@ -387,9 +374,9 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
 
 class SingleTaskCompressor(MultiTaskMixedLatentCompressor):
     """
-        A single MeanScaleHyperPrior network which compresses a single task.
+        A single compressor network which compresses a single task.
 
-        This is basically MeanScaleHyperPrior but with variable number of channels for the input.
+        This is basically the compression_model_class but with variable number of channels for the input.
         OR a MultiTaskMixedLatentCompressor with the list of tasks including only a single task
     """
 
@@ -400,6 +387,9 @@ class SingleTaskCompressor(MultiTaskMixedLatentCompressor):
             input_channels: int,
             latent_channels: int,
             lmbda: float = 0.5,
+            n_epoch_log=1,
+            pretrained: bool = False,
+            quality: int = 4,
             **kwargs
     ):
         """
@@ -413,6 +403,9 @@ class SingleTaskCompressor(MultiTaskMixedLatentCompressor):
                          input_channels=(input_channels, ),
                          latent_channels=latent_channels,
                          lmbda=lmbda,
+                         n_epoch_log=n_epoch_log,
+                         pretrained=pretrained,
+                         quality=quality,
                          **kwargs)
 
         self.task = task
