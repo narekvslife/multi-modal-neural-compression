@@ -1,4 +1,4 @@
-from typing import Tuple, Dict, Union, List
+from typing import Tuple, Dict, Union
 
 import torch
 import torch.nn as nn
@@ -32,7 +32,6 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
             input_channels: Tuple[int],
             latent_channels: int,
             lmbda: float = 0.5,
-            n_epoch_log: int = 50,
             pretrained: bool = False,
             quality: int = 4,
             **kwargs
@@ -43,8 +42,7 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
         :param: input_channels - tuple with the number of channels of each task
         :param: latent_channels - number of channels in the latent space
         :param: lmbda - multiplier of the compression loss in the total loss
-        :param: n_epoch_log - log additional metrics/images each n_epoch_log epochs
-        """
+=        """
         super().__init__()
         self.save_hyperparameters()
         self.compression_model_class = compression_model_class
@@ -57,8 +55,6 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
         self.latent_channels = latent_channels
 
         self.lmbda = lmbda
-
-        self.n_epoch_log = n_epoch_log
 
         self.pretrained = pretrained
 
@@ -97,8 +93,7 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
             if is_deconv:
                 head = nn.Sequential(deconv(i_c, pti_c),
                                      GDN(pti_c, inverse=True),
-                                     deconv(pti_c, pto_c),
-                                     GDN(pto_c, inverse=True))
+                                     deconv(pti_c, pto_c))
             else:
                 head = nn.Sequential(conv(i_c, pti_c),
                                      GDN(pti_c),
@@ -387,7 +382,6 @@ class SingleTaskCompressor(MultiTaskMixedLatentCompressor):
             input_channels: int,
             latent_channels: int,
             lmbda: float = 0.5,
-            n_epoch_log=1,
             pretrained: bool = False,
             quality: int = 4,
             **kwargs
@@ -403,7 +397,6 @@ class SingleTaskCompressor(MultiTaskMixedLatentCompressor):
                          input_channels=(input_channels, ),
                          latent_channels=latent_channels,
                          lmbda=lmbda,
-                         n_epoch_log=n_epoch_log,
                          pretrained=pretrained,
                          quality=quality,
                          **kwargs)

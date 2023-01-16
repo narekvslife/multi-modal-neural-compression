@@ -3,7 +3,6 @@ from typing import Any
 import pytorch_lightning as pl
 from pytorch_lightning import Callback
 from pytorch_lightning.loggers import WandbLogger
-from pytorch_lightning.utilities.types import STEP_OUTPUT
 
 from constants import WANDB_RUN_NAME, WANDB_PROJECT_NAME
 
@@ -29,7 +28,7 @@ class LogPredictionSamplesCallback(Callback):
                 images=[xh[0].detach().numpy() for xh in x_hats_task])
 
             # show target only once
-            if pl_module.current_epoch < pl_module.n_epoch_log:
+            if trainer.global_step < 100:
                 WandbLogger(name=WANDB_RUN_NAME,
                             project=WANDB_PROJECT_NAME,
                             log_model="all").log_image(

@@ -1,7 +1,6 @@
 from typing import Tuple
 
-import torch
-from pytorch_lightning.loggers import WandbLogger
+
 from torch.utils.data import DataLoader, Dataset
 from torch.random import manual_seed
 
@@ -9,17 +8,17 @@ import torchvision
 from torchvision.transforms import transforms
 
 import pytorch_lightning as pl
+from pytorch_lightning.loggers import WandbLogger
 
-from compressai.models import MeanScaleHyperprior, ScaleHyperprior
+from compressai.models import ScaleHyperprior
 
 import utils
 import models
+import datasets
+from datasets.transforms import make_collate_fn
 from callbacks import LogPredictionSamplesCallback
-from transforms import make_collate_fn
 
-from constants import WANDB_PROJECT_NAME, MNIST, FASHION_MNIST, CLEVR, DATASET, WANDB_RUN_NAME, SINGLE_TASK
-
-IMAGENET_ROOT = "../data/imagenet_multitask/"
+from constants import (WANDB_PROJECT_NAME, MNIST, FASHION_MNIST, CLEVR, DATASET, WANDB_RUN_NAME, SINGLE_TASK)
 
 BATCH_SIZE = 16
 LATENT_CHANNELS = 90
@@ -56,6 +55,10 @@ def get_dataloader(dataset_name: str, batch_size: int, num_workers: int, is_trai
                                              download=True,
                                              transform=trans,
                                              train=is_train)
+    elif dataset_name == CLEVR:
+        dataset = datasets.CLEVRDataset(root,
+                                        tasks=[SINGLE_TASK],
+                                        split="train" if is_train else "val")
     else:
         raise NotImplementedError(f"Dataset {dataset_name} is not supported")
 
@@ -91,7 +94,6 @@ def main():
                                                          task=SINGLE_TASK,
                                                          input_channels=task_input_channels[SINGLE_TASK],
                                                          latent_channels=LATENT_CHANNELS,
-                                                         n_epoch_log=1,
                                                          pretrained=True)
 
     trainer = pl.Trainer(
