@@ -30,27 +30,29 @@ DATASET_ROOTS = {FASHION_MNIST: "../data/fashion-mnist",
 def_t = transforms.Compose([transforms.Resize((256, 256)),
                             transforms.ToTensor()])
 
-def_c = make_collate_fn("mono")
+def_c = make_collate_fn(SINGLE_TASK)
 
 DATASET_TRANSFORMS = {FASHION_MNIST: def_t,
                       MNIST: def_t,
                       CLEVR: def_t}
 
 DATASET_COLLATE = {FASHION_MNIST: def_c,
-                   MNIST: def_c}
+                   MNIST: def_c,
+                   CLEVR: def_c}
 
 
 def get_dataloader(dataset_name: str, batch_size: int, num_workers: int, is_train=False) -> Tuple[Dataset, DataLoader]:
 
     root = DATASET_ROOTS[dataset_name]
-    trans = DATASET_TRANSFORMS[dataset_name]
 
     if dataset_name == FASHION_MNIST:
+        trans = DATASET_TRANSFORMS[dataset_name]
         dataset = torchvision.datasets.FashionMNIST(root,
                                                     download=True,
                                                     transform=trans,
                                                     train=is_train)
     elif dataset_name == MNIST:
+        trans = DATASET_TRANSFORMS[dataset_name]
         dataset = torchvision.datasets.MNIST(root,
                                              download=True,
                                              transform=trans,
@@ -62,7 +64,6 @@ def get_dataloader(dataset_name: str, batch_size: int, num_workers: int, is_trai
     else:
         raise NotImplementedError(f"Dataset {dataset_name} is not supported")
 
-    # dataset = torch.utils.data.Subset(dataset, range(16))
     dataloader = DataLoader(dataset=dataset,
                             batch_size=batch_size,
                             num_workers=num_workers,
@@ -83,13 +84,12 @@ def main():
 
     dataset_train, dataloader_train = get_dataloader(dataset_name=DATASET,
                                                      batch_size=BATCH_SIZE,
-                                                     num_workers=4,
+                                                     num_workers=1,
                                                      is_train=True)
     dataset_val, dataloader_val = get_dataloader(dataset_name=DATASET,
                                                  batch_size=BATCH_SIZE,
-                                                 num_workers=4,
+                                                 num_workers=1,
                                                  is_train=False)
-
     single_task_compressor = models.SingleTaskCompressor(ScaleHyperprior,
                                                          task=SINGLE_TASK,
                                                          input_channels=task_input_channels[SINGLE_TASK],
@@ -97,8 +97,8 @@ def main():
                                                          pretrained=True)
 
     trainer = pl.Trainer(
-        accelerator="cpu",
-        devices=4,
+        accelerator="gpu",
+        devices=1,
         max_epochs=1000,
         check_val_every_n_epoch=1,
         enable_progress_bar=True,

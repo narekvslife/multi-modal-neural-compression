@@ -1,1 +1,1 @@
-from clevr import CLEVRDataset
+from .clevr import CLEVRDataset
