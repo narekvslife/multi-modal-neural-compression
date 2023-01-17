@@ -25,7 +25,7 @@ LATENT_CHANNELS = 90
 
 DATASET_ROOTS = {FASHION_MNIST: "../data/fashion-mnist",
                  MNIST: "../data/mnist",
-                 CLEVR: "../data/clevr"}
+                 CLEVR: "../../vilabdatasets/clevr/clevr-taskonomy-complex/"}
 
 def_t = transforms.Compose([transforms.Resize((256, 256)),
                             transforms.ToTensor()])
@@ -84,11 +84,11 @@ def main():
 
     dataset_train, dataloader_train = get_dataloader(dataset_name=DATASET,
                                                      batch_size=BATCH_SIZE,
-                                                     num_workers=4,
+                                                     num_workers=16,
                                                      is_train=True)
     dataset_val, dataloader_val = get_dataloader(dataset_name=DATASET,
                                                  batch_size=BATCH_SIZE,
-                                                 num_workers=4,
+                                                 num_workers=16,
                                                  is_train=False)
     single_task_compressor = models.SingleTaskCompressor(ScaleHyperprior,
                                                          task=SINGLE_TASK,

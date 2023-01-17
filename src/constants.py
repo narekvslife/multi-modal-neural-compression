@@ -18,4 +18,4 @@ DATASET = CLEVR
 SINGLE_TASK = "rgb"
 
 WANDB_PROJECT_NAME = "vilab-compression"
-WANDB_RUN_NAME = f"S-{DATASET}-{SINGLE_TASK}-full-pretrained"
+WANDB_RUN_NAME = f"S-{DATASET}-{SINGLE_TASK}-lrplat"
