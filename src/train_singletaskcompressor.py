@@ -1,6 +1,6 @@
 from typing import Tuple
 
-
+from pytorch_lightning.callbacks import LearningRateMonitor
 from torch.utils.data import DataLoader, Dataset
 from torch.random import manual_seed
 
@@ -20,7 +20,7 @@ from callbacks import LogPredictionSamplesCallback
 
 from constants import (WANDB_PROJECT_NAME, MNIST, FASHION_MNIST, CLEVR, DATASET, WANDB_RUN_NAME, SINGLE_TASK)
 
-BATCH_SIZE = 8
+BATCH_SIZE = 256
 LATENT_CHANNELS = 90
 
 DATASET_ROOTS = {FASHION_MNIST: "../data/fashion-mnist",
@@ -84,11 +84,11 @@ def main():
 
     dataset_train, dataloader_train = get_dataloader(dataset_name=DATASET,
                                                      batch_size=BATCH_SIZE,
-                                                     num_workers=1,
+                                                     num_workers=4,
                                                      is_train=True)
     dataset_val, dataloader_val = get_dataloader(dataset_name=DATASET,
                                                  batch_size=BATCH_SIZE,
-                                                 num_workers=1,
+                                                 num_workers=4,
                                                  is_train=False)
     single_task_compressor = models.SingleTaskCompressor(ScaleHyperprior,
                                                          task=SINGLE_TASK,
@@ -105,7 +105,7 @@ def main():
         logger=WandbLogger(name=WANDB_RUN_NAME,
                            project=WANDB_PROJECT_NAME,
                            log_model="all"),
-        callbacks=[LogPredictionSamplesCallback()]
+        callbacks=[LogPredictionSamplesCallback(), LearningRateMonitor()]
     )
 
     trainer.fit(model=single_task_compressor,

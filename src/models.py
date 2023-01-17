@@ -327,7 +327,7 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
             "train/ms-ssim": self.multitask_ms_ssim(x=batch, x_hats=x_hats)
         }
 
-        self.log_dict(log_dict, on_step=True, sync_dist=True)
+        self.log_dict(log_dict, on_step=True, on_epoch=False, sync_dist=True)
 
         return loss
 
@@ -349,7 +349,7 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
             "val/ms_ssim": self.multitask_ms_ssim(x=batch, x_hats=x_hats)
         }
 
-        self.log_dict(log_dict, on_step=True, sync_dist=True)
+        self.log_dict(log_dict, on_step=False, on_epoch=True, sync_dist=True)
         return loss
 
     def get_main_parameters(self):
