@@ -8,6 +8,7 @@ import pytorch_lightning as pl
 from compressai.models import ScaleHyperprior
 
 from pytorch_msssim import ms_ssim
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torchmetrics.functional.image.psnr import peak_signal_noise_ratio
 
 from compressai.layers import GDN
@@ -306,6 +307,9 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
         return batch
 
     def training_step(self, batch, batch_idx):
+
+
+
         x_hats, likelihoods = self.forward(batch)
 
         rec_loss = self.multitask_reconstruction_loss(x=batch, x_hats=x_hats)
@@ -356,11 +360,11 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
 
     def configure_optimizers(self):
         main_optimizer = torch.optim.Adam(self.get_main_parameters(), lr=1e-4)
-        auxilary_optimizer = torch.optim.Adam(self.get_auxilary_parameters(), lr=1e-3)
+        lr_schedulers = {"scheduler": ReduceLROnPlateau(main_optimizer), "monitor": ["train_loss", "val_loss"]}
 
+        # auxilary_optimizer = torch.optim.Adam(self.get_auxilary_parameters(), lr=1e-3)
         return {"optimizer": main_optimizer,
-                "auxilary_optimizer": auxilary_optimizer,
-                "monitor": ["train_loss", "val_loss"]}
+                "scheduler": lr_schedulers}
 
     def compress(self, batch):
         x = self.forward_input_heads(batch)
