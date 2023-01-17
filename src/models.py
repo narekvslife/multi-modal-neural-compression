@@ -306,9 +306,6 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
         return batch
 
     def training_step(self, batch, batch_idx):
-
-        batch = self.__batch_to_device(batch)
-
         x_hats, likelihoods = self.forward(batch)
 
         rec_loss = self.multitask_reconstruction_loss(x=batch, x_hats=x_hats)

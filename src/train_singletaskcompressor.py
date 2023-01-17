@@ -20,7 +20,7 @@ from callbacks import LogPredictionSamplesCallback
 
 from constants import (WANDB_PROJECT_NAME, MNIST, FASHION_MNIST, CLEVR, DATASET, WANDB_RUN_NAME, SINGLE_TASK)
 
-BATCH_SIZE = 16
+BATCH_SIZE = 8
 LATENT_CHANNELS = 90
 
 DATASET_ROOTS = {FASHION_MNIST: "../data/fashion-mnist",
@@ -73,7 +73,7 @@ def get_dataloader(dataset_name: str, batch_size: int, num_workers: int, is_trai
 
 
 def main():
-    manual_seed(21)
+    pl.seed_everything(21)
 
     utils.set_wandb_logger(WANDB_RUN_NAME, WANDB_PROJECT_NAME)
 
@@ -99,7 +99,7 @@ def main():
     trainer = pl.Trainer(
         accelerator="gpu",
         devices=1,
-        max_epochs=1000,
+        max_epochs=10,
         check_val_every_n_epoch=1,
         enable_progress_bar=True,
         logger=WandbLogger(name=WANDB_RUN_NAME,
