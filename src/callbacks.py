@@ -27,7 +27,7 @@ class LogPredictionSamplesCallback(Callback):
                         project=WANDB_PROJECT_NAME,
                         log_model="all").log_image(
                 key=f'{directory}/{task}/predicted',
-                images=[xh[0] for xh in x_hats_task])
+                images=[xh for xh in x_hats_task])
 
             # show target only once
             if trainer.global_step < 100:
@@ -35,7 +35,7 @@ class LogPredictionSamplesCallback(Callback):
                             project=WANDB_PROJECT_NAME,
                             log_model="all").log_image(
                     key=f'{directory}/{task}/target',
-                    images=[x[0] for x in x_task])
+                    images=[x for x in x_task])
 
     def on_train_batch_start(
         self, trainer: "pl.Trainer", pl_module: "pl.LightningModule", batch: Any, batch_idx: int
