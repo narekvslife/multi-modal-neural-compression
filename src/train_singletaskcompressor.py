@@ -1,8 +1,7 @@
 from typing import Tuple
 
 from pytorch_lightning.callbacks import LearningRateMonitor
-from torch.utils.data import DataLoader, Dataset
-from torch.random import manual_seed
+from torch.utils.data import DataLoader, Dataset, Subset
 
 import torchvision
 from torchvision.transforms import transforms
@@ -16,11 +15,11 @@ import utils
 import models
 import datasets
 from datasets.transforms import make_collate_fn
-from callbacks import LogPredictionSamplesCallback
+import callbacks
 
 from constants import (WANDB_PROJECT_NAME, MNIST, FASHION_MNIST, CLEVR, DATASET, WANDB_RUN_NAME, SINGLE_TASK)
 
-BATCH_SIZE = 256
+BATCH_SIZE = 8
 LATENT_CHANNELS = 90
 
 DATASET_ROOTS = {FASHION_MNIST: "../data/fashion-mnist",
@@ -64,6 +63,7 @@ def get_dataloader(dataset_name: str, batch_size: int, num_workers: int, is_trai
     else:
         raise NotImplementedError(f"Dataset {dataset_name} is not supported")
 
+    dataset = Subset(dataset, range(8))
     dataloader = DataLoader(dataset=dataset,
                             batch_size=batch_size,
                             num_workers=num_workers,
@@ -84,11 +84,11 @@ def main():
 
     dataset_train, dataloader_train = get_dataloader(dataset_name=DATASET,
                                                      batch_size=BATCH_SIZE,
-                                                     num_workers=16,
+                                                     num_workers=1,
                                                      is_train=True)
     dataset_val, dataloader_val = get_dataloader(dataset_name=DATASET,
                                                  batch_size=BATCH_SIZE,
-                                                 num_workers=16,
+                                                 num_workers=1,
                                                  is_train=False)
     single_task_compressor = models.SingleTaskCompressor(ScaleHyperprior,
                                                          task=SINGLE_TASK,
@@ -97,15 +97,18 @@ def main():
                                                          pretrained=True)
 
     trainer = pl.Trainer(
-        accelerator="gpu",
+        accelerator="cpu",
         devices=1,
         max_epochs=10,
+        log_every_n_steps=1,
         check_val_every_n_epoch=1,
         enable_progress_bar=True,
         logger=WandbLogger(name=WANDB_RUN_NAME,
                            project=WANDB_PROJECT_NAME,
                            log_model="all"),
-        callbacks=[LogPredictionSamplesCallback(), LearningRateMonitor()]
+        callbacks=[callbacks.LogPredictionSamplesCallback(),
+                   LearningRateMonitor()]
+                   # callbacks.OptimizeAuxilaryLossCallback()]
     )
 
     trainer.fit(model=single_task_compressor,

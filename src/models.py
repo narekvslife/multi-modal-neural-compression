@@ -59,6 +59,8 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
 
         self.pretrained = pretrained
 
+        self.automatic_optimization = False
+
         self.quality = quality
 
         if self.pretrained:
@@ -141,13 +143,13 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
 
     def _build_model(self) -> nn.ModuleDict:
         """
-        x1 -> task_enc1 -> t_1 ->  ↓                                      -> task_dec1 -> x1_hat
+        x1 -> task_enc1 -> t_1 ->  ↓                              -> task_dec1 -> x1_hat
 
-        x2 -> task_enc2 -> t_2 -> [+] -> t -> compressor_network -> t_hat -> task_dec2 -> x2_hat
+        x2 -> task_enc2 -> t_2 -> [+] -> t -> compressor -> t_hat -> task_dec2 -> x2_hat
 
-        x3 -> task_enc3 -> t_3 ->  ↑                                      -> task_dec3 -> x3_hat
+        x3 -> task_enc3 -> t_3 ->  ↑                              -> task_dec3 -> x3_hat
 
-        **kwargs - additional arguments for the compressor_network model
+        **kwargs - additional arguments for the "compressor" model
         """
 
         model = nn.ModuleDict()
@@ -166,7 +168,7 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
         total_task_channels = t_i_channels * self.n_tasks
 
         # these task-specific are stacked and passed to the default compressai model
-        model["compressor_network"] = self.__get_compression_network(N=total_task_channels, M=self.latent_channels)
+        model["compressor"] = self.__get_compression_network(N=total_task_channels, M=self.latent_channels)
 
         # now that mixed representations should be passed to task-specific output heads
         model["output_heads"] = self.__build_heads(total_task_channels, self.input_channels, is_deconv=True)
@@ -233,7 +235,7 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
         stacked_t = self.forward_input_heads(batch)
 
         # now pass through the main compressor network
-        stacked_t_preds = self.model["compressor_network"](stacked_t)
+        stacked_t_preds = self.model["compressor"](stacked_t)
 
         stacked_t_hat = stacked_t_preds["x_hat"]
         stacked_t_likelihoods = stacked_t_preds["likelihoods"]  # {"y": y_likelihoods, "z": z_likelihoods}
@@ -307,8 +309,16 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
         return batch
 
     def training_step(self, batch, batch_idx):
+        """
+        Note that we do manual optimization and not an automatic one (which comes with pytorch lightning)
+        because we have two parameters to optimize
+        :param batch:
+        :param batch_idx:
+        :return:
+        """
 
-
+        # main optimization
+        main_opt, aux_opt = self.optimizers()
 
         x_hats, likelihoods = self.forward(batch)
 
@@ -319,12 +329,27 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
 
         loss = rec_loss + self.lmbda * compression_loss
 
+        main_opt.zero_grad()
+        self.manual_backward(loss)
+        main_opt.step()
+
+        # aux optimization
+        main_weights_before = self.get_main_parameters()
+
+        aux_loss = self.model["compressor"].entropy_bottleneck.loss()
+
+        aux_opt.zero_grad()
+        self.manual_backward(loss=aux_loss)
+        aux_opt.step()
+
         log_dict = {
             "train/rec_loss": rec_loss,
             "train/compression_loss": compression_loss,
             "train/loss": loss,
             "train/psnr": self.multitask_psnr(x=batch, x_hats=x_hats),
-            "train/ms-ssim": self.multitask_ms_ssim(x=batch, x_hats=x_hats)
+            "train/ms-ssim": self.multitask_ms_ssim(x=batch, x_hats=x_hats),
+
+            "aux/loss": aux_loss,
         }
 
         self.log_dict(log_dict, on_step=True, on_epoch=False, sync_dist=True)
@@ -362,17 +387,16 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
         main_optimizer = torch.optim.Adam(self.get_main_parameters(), lr=1e-4)
         lr_schedulers = {"scheduler": ReduceLROnPlateau(main_optimizer), "monitor": ["train_loss", "val_loss"]}
 
-        # auxilary_optimizer = torch.optim.Adam(self.get_auxilary_parameters(), lr=1e-3)
-        return {"optimizer": main_optimizer,
-                "scheduler": lr_schedulers}
+        auxilary_optimizer = torch.optim.Adam(self.get_auxilary_parameters(), lr=1e-3)
+        return {"optimizer": main_optimizer, "scheduler": lr_schedulers}, {"optimizer": auxilary_optimizer}
 
     def compress(self, batch):
         x = self.forward_input_heads(batch)
-        ans = self.model["compressor_network"].compress(x)  # {"strings": [y_strings, z_strings],"shape": z.size()[-2:]}
+        ans = self.model["compressor"].compress(x)  # {"strings": [y_strings, z_strings],"shape": z.size()[-2:]}
         return ans
 
     def decompress(self, strings, shape):
-        x_hat = self.model["compressor_network"].decompress(strings, shape)
+        x_hat = self.model["compressor"].decompress(strings, shape)
         return self.forward_output_heads(x_hat)
 
 

@@ -10,7 +10,6 @@ from constants import WANDB_RUN_NAME, WANDB_PROJECT_NAME
 
 
 class LogPredictionSamplesCallback(Callback):
-
     def log_predicted_images(self, batch, trainer: "pl.Trainer", pl_module: "pl.LightningModule", directory: str) -> None:
 
         x_hats, likelihoods = pl_module(batch)
@@ -40,9 +39,9 @@ class LogPredictionSamplesCallback(Callback):
     def on_train_batch_start(
         self, trainer: "pl.Trainer", pl_module: "pl.LightningModule", batch: Any, batch_idx: int
     ) -> None:
+
         if trainer.global_step % 100 != 0:
             return None
-
 
         with torch.no_grad():
             pl_module.eval()
