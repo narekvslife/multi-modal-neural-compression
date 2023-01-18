@@ -67,6 +67,7 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
             print("Note that pretrained models have their own (fixed) number of latent channels independent of specified M")
 
         self.kwargs = kwargs
+
         self.model: nn.ModuleDict = self._build_model()
 
     def __build_heads(self,
@@ -260,7 +261,8 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
         if loss_type == "mse":
             loss = F.mse_loss(x, x_hat, reduction="none")
             # sum over all dimensions, average over batch dimension
-            loss = loss.sum(dim=[1, 2, 3]).mean(dim=[0])
+            # and over channels so that images with different channels have the same effect
+            loss = loss.sum(dim=[1, 2, 3]).mean(dim=[0]) / x.shape[1]
 
         elif loss_type == "ms-ssim":
             raise NotImplementedError("ms-ssim not implemented yet")
@@ -269,7 +271,7 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
 
         return loss
 
-    # TODO: the loss/metric functions below can/should be merged
+    # TODO: the loss/metric functions below should be merged into one function, the code is copy-pasted
     def multitask_reconstruction_loss(self, x, x_hats):
         reconstruction_loss = 0
         for task in self.tasks:
@@ -328,9 +330,6 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
         self.manual_backward(loss)
         main_opt.step()
 
-        # aux optimization
-        main_weights_before = self.get_main_parameters()
-
         aux_loss = self.model["compressor"].entropy_bottleneck.loss()
 
         aux_opt.zero_grad()
@@ -382,15 +381,24 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
         main_optimizer = torch.optim.Adam(self.get_main_parameters(), lr=1e-4)
         lr_schedulers = {"scheduler": ReduceLROnPlateau(main_optimizer, threshold=5, factor=0.5, min_lr=1e-9), "monitor": ["train_loss", "val_loss"]}
 
-        auxilary_optimizer = torch.optim.Adam(self.get_auxilary_parameters(), lr=1e-3)
+        auxilary_optimizer = torch.optim.Adam(self.get_auxilary_parameters(), lr=1e-4)
         return {"optimizer": main_optimizer, "scheduler": lr_schedulers}, {"optimizer": auxilary_optimizer}
 
+    def update_bottleneck_quantiles(self):
+        self.model["compressor"].entropy_bottleneck.update()
+
     def compress(self, batch):
+        self.update_bottleneck_quantiles()
+
         x = self.forward_input_heads(batch)
         ans = self.model["compressor"].compress(x)  # {"strings": [y_strings, z_strings],"shape": z.size()[-2:]}
         return ans
 
     def decompress(self, strings, shape):
+        compressor = self.model["compressor"]
+
+        compressor.entropy_bottleneck.update()
+
         x_hat = self.model["compressor"].decompress(strings, shape)
         return self.forward_output_heads(x_hat)
 
