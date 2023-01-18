@@ -97,7 +97,9 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
             if is_deconv:
                 head = nn.Sequential(deconv(i_c, pti_c),
                                      GDN(pti_c, inverse=True),
-                                     deconv(pti_c, pto_c))
+                                     deconv(pti_c, pto_c),
+                                     GDN(pto_c, inverse=True),
+                                     conv(pto_c, pto_c, kernel_size=3, stride=1))
             else:
                 head = nn.Sequential(conv(i_c, pti_c),
                                      GDN(pti_c),
