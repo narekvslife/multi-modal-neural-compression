@@ -40,7 +40,7 @@ class LogPredictionSamplesCallback(Callback):
         self, trainer: "pl.Trainer", pl_module: "pl.LightningModule", batch: Any, batch_idx: int
     ) -> None:
 
-        if trainer.global_step % 100 != 0:
+        if trainer.global_step % 1000 != 0:
             return None
 
         with torch.no_grad():

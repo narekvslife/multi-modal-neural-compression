@@ -13,9 +13,9 @@ MNIST = "mnist"
 FASHION_MNIST = "fashion-mnist"
 CLEVR = "clevr"
 
-DATASET = FASHION_MNIST
+DATASET = CLEVR
 
-SINGLE_TASK = "mono"
+SINGLE_TASK = "rgb"
 
 WANDB_PROJECT_NAME = "vilab-compression"
 WANDB_RUN_NAME = f"S-{DATASET}-{SINGLE_TASK}-aux"

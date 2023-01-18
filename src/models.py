@@ -303,11 +303,6 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
 
         return compression_loss
 
-    def __batch_to_device(self, batch):
-        for task in self.tasks:
-            batch[task] = batch[task].to(self.device)
-        return batch
-
     def training_step(self, batch, batch_idx):
         """
         Note that we do manual optimization and not an automatic one (which comes with pytorch lightning)
@@ -385,7 +380,7 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
 
     def configure_optimizers(self):
         main_optimizer = torch.optim.Adam(self.get_main_parameters(), lr=1e-4)
-        lr_schedulers = {"scheduler": ReduceLROnPlateau(main_optimizer), "monitor": ["train_loss", "val_loss"]}
+        lr_schedulers = {"scheduler": ReduceLROnPlateau(main_optimizer, threshold=5, factor=0.5, min_lr=1e-9), "monitor": ["train_loss", "val_loss"]}
 
         auxilary_optimizer = torch.optim.Adam(self.get_auxilary_parameters(), lr=1e-3)
         return {"optimizer": main_optimizer, "scheduler": lr_schedulers}, {"optimizer": auxilary_optimizer}
