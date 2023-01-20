@@ -97,13 +97,17 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
             if is_deconv:
                 head = nn.Sequential(deconv(i_c, pti_c),
                                      GDN(pti_c, inverse=True),
-                                     deconv(pti_c, pto_c),
+                                     deconv(pti_c, pti_c),
+                                     GDN(pti_c, inverse=True),
+                                     deconv(pti_c, pto_c, stride=1),
                                      GDN(pto_c, inverse=True),
                                      conv(pto_c, pto_c, kernel_size=3, stride=1))
             else:
-                head = nn.Sequential(conv(i_c, pti_c),
+                head = nn.Sequential(conv(i_c, pti_c, kernel_size=3, stride=1),
                                      GDN(pti_c),
                                      conv(pti_c, pto_c),
+                                     GDN(pto_c),
+                                     conv(pto_c, pto_c),
                                      GDN(pto_c))
 
             list_of_modules.append(head)
@@ -380,10 +384,10 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
         return set(p for n, p in self.model.named_parameters() if n.endswith(".quantiles"))
 
     def configure_optimizers(self):
-        main_optimizer = torch.optim.Adam(self.get_main_parameters(), lr=1e-4)
+        main_optimizer = torch.optim.Adam(self.get_main_parameters(), lr=1e-5)
         lr_schedulers = {"scheduler": ReduceLROnPlateau(main_optimizer, threshold=5, factor=0.5, min_lr=1e-9), "monitor": ["train_loss", "val_loss"]}
 
-        auxilary_optimizer = torch.optim.Adam(self.get_auxilary_parameters(), lr=1e-4)
+        auxilary_optimizer = torch.optim.Adam(self.get_auxilary_parameters(), lr=1e-3)
         return {"optimizer": main_optimizer, "scheduler": lr_schedulers}, {"optimizer": auxilary_optimizer}
 
     def update_bottleneck_quantiles(self):
