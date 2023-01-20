@@ -168,7 +168,7 @@ def get_dataloader(dataset_name: str, batch_size: int, num_workers: int, collate
     else:
         raise NotImplementedError(f"Dataset {dataset_name} is not supported")
 
-    dataset = Subset(dataset, range(16))
+    # dataset = Subset(dataset, range(16))
     dataloader = DataLoader(dataset=dataset,
                             batch_size=batch_size,
                             num_workers=num_workers,
@@ -202,7 +202,7 @@ def main(args):
         single_task_compressor = models.SingleTaskCompressor(ScaleHyperprior,
                                                              task=args.tasks[0],
                                                              input_channels=task_configs.task_parameters[args.tasks[0]]["out_channels"],
-                                                             latent_channels=args.latent_size,  # TODO: this doesn't matter - for pretrained networks it's fixed
+                                                             latent_channels=args.latent_size,
                                                              pretrained=args.pretrained,
                                                              quality=args.quality,
                                                              lmbd=args.lmbda,
