@@ -15,7 +15,12 @@ class LogPredictionSamplesCallback(Callback):
 
     def log_predicted_images(self, batch, trainer: "pl.Trainer", pl_module: "pl.LightningModule", directory: str) -> None:
 
-        x_hats, likelihoods = pl_module(batch)
+        # unfortunatelly this has to be here :(
+        for task in pl_module.tasks:
+            batch[task] = batch[task].to(pl_module.device)
+
+        x_hats, _ = pl_module(batch)
+
         for task in pl_module.tasks:
             x_hats_task = x_hats[task]
 
