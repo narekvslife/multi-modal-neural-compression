@@ -63,12 +63,21 @@ def parse_args(argv):
         help="Max number of epochs (default: %(default)s)",
     )
     parser.add_argument(
-        "-lr",
-        "--learning-rate",
-        default=1e-4,
+        "-lrm",
+        "--learning-rate-main",
+        default=1e-5,
         type=float,
-        help="Learning rate (default: %(default)s)",
+        help="Learning rate for the main loss (default: %(default)s)",
     )
+
+    parser.add_argument(
+        "-lra",
+        "--learning-rate-aux",
+        default=1e-3,
+        type=float,
+        help="Learning rate for the auxilary loss(default: %(default)s)",
+    )
+
     parser.add_argument(
         "-n",
         "--num-workers",
@@ -193,10 +202,12 @@ def main(args):
         single_task_compressor = models.SingleTaskCompressor(ScaleHyperprior,
                                                              task=args.tasks[0],
                                                              input_channels=task_configs.task_parameters[args.tasks[0]]["out_channels"],
-                                                             latent_channels=10,  # TODO: this doesn't matter - for pretrained networks it's fixed
+                                                             latent_channels=args.latent_size,  # TODO: this doesn't matter - for pretrained networks it's fixed
                                                              pretrained=args.pretrained,
                                                              quality=args.quality,
-                                                             lmbd=args.lmbda)
+                                                             lmbd=args.lmbda,
+                                                             learning_rate_main=args.learning_rate_main,
+                                                             learning_rate_aux=args.learning_rate_aux)
     else:
         raise NotImplementedError(f"Architecture number {args.model} is not available")
 

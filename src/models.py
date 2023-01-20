@@ -35,6 +35,8 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
             lmbda: float = 1,
             pretrained: bool = False,
             quality: int = 4,
+            learning_rate_main=1e-5,
+            learning_rate_aux=1e-3,
             **kwargs
     ):
         """
@@ -51,6 +53,7 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
         self.tasks = tasks
         self.n_tasks = len(self.tasks)
         self.input_channels = input_channels
+
         assert self.n_tasks == len(self.input_channels)
 
         self.latent_channels = latent_channels
@@ -63,12 +66,15 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
 
         self.quality = quality
 
-        if self.pretrained:
-            print("Note that pretrained models have their own (fixed) number of latent channels independent of specified M")
+        self.learning_rate_main = learning_rate_main
+        self.learning_rate_aux = learning_rate_aux
 
         self.kwargs = kwargs
 
         self.model: nn.ModuleDict = self._build_model()
+
+        if self.pretrained:
+            print("Note that pretrained models have fixed size of latents, independent of specified 'latent_channels'")
 
     def __build_heads(self,
                       input_channels: Union[Tuple[int], int],
@@ -384,10 +390,15 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
         return set(p for n, p in self.model.named_parameters() if n.endswith(".quantiles"))
 
     def configure_optimizers(self):
-        main_optimizer = torch.optim.Adam(self.get_main_parameters(), lr=1e-5)
-        lr_schedulers = {"scheduler": ReduceLROnPlateau(main_optimizer, threshold=5, factor=0.5, min_lr=1e-9), "monitor": ["train_loss", "val_loss"]}
+        main_optimizer = torch.optim.Adam(self.get_main_parameters(), lr=self.learning_rate_main)
+        lr_schedulers = {"scheduler": ReduceLROnPlateau(main_optimizer,
+                                                        threshold=0.2,
+                                                        factor=0.5,
+                                                        min_lr=1e-9,
+                                                        mode="min"),
+                         "monitor": ["train_loss", "val_loss"]}
 
-        auxilary_optimizer = torch.optim.Adam(self.get_auxilary_parameters(), lr=1e-3)
+        auxilary_optimizer = torch.optim.Adam(self.get_auxilary_parameters(), lr=self.learning_rate_aux)
         return {"optimizer": main_optimizer, "scheduler": lr_schedulers}, {"optimizer": auxilary_optimizer}
 
     def update_bottleneck_quantiles(self):
@@ -426,6 +437,8 @@ class SingleTaskCompressor(MultiTaskMixedLatentCompressor):
             lmbda: float = 1,
             pretrained: bool = False,
             quality: int = 4,
+            learning_rate_main=1e-5,
+            learning_rate_aux=1e-3,
             **kwargs
     ):
         """
@@ -441,4 +454,6 @@ class SingleTaskCompressor(MultiTaskMixedLatentCompressor):
                          lmbda=lmbda,
                          pretrained=pretrained,
                          quality=quality,
+                         learning_rate_main=learning_rate_main,
+                         learning_rate_aux=learning_rate_aux,
                          **kwargs)
