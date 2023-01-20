@@ -32,7 +32,7 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
             tasks: Tuple[str],
             input_channels: Tuple[int],
             latent_channels: int,
-            lmbda: float = 0.5,
+            lmbda: float = 1,
             pretrained: bool = False,
             quality: int = 4,
             **kwargs
@@ -289,14 +289,14 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
     def multitask_psnr(self, x, x_hats):
         psnr = 0
         for task in self.tasks:
-            psnr += peak_signal_noise_ratio(x_hats[task] * 255, x * 255, data_range=255)
+            psnr += peak_signal_noise_ratio(x_hats[task] * 255, x[task] * 255, data_range=255)
 
         return psnr / self.n_tasks
 
     def multitask_ms_ssim(self, x, x_hats):
         msssim = 0
         for task in self.tasks:
-            msssim += ms_ssim(x_hats[task] * 255, x * 255, data_range=2550)
+            msssim += ms_ssim(x_hats[task] * 255, x[task] * 255, data_range=255)
 
         return msssim / self.n_tasks
 
@@ -330,7 +330,7 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
         compression_loss = self.compression_loss(likelihoods=likelihoods,
                                                  num_pixels=self.__get_number_of_pixels(x_hats))
 
-        loss = rec_loss + self.lmbda * compression_loss
+        loss = self.lmbda * rec_loss + compression_loss
 
         main_opt.zero_grad()
         self.manual_backward(loss)
@@ -423,13 +423,13 @@ class SingleTaskCompressor(MultiTaskMixedLatentCompressor):
             task: str,
             input_channels: int,
             latent_channels: int,
-            lmbda: float = 0.5,
+            lmbda: float = 1,
             pretrained: bool = False,
             quality: int = 4,
             **kwargs
     ):
         """
-        :param: compression_model_class - type of the backbone compresion model
+        :param: compression_model_class - type of the backbone compression model
         :param: task - the name of the task
         :param: input_channels - tuple with the number of channels of each task
         :param: latent_channels - number of channels in the latent space
@@ -442,33 +442,3 @@ class SingleTaskCompressor(MultiTaskMixedLatentCompressor):
                          pretrained=pretrained,
                          quality=quality,
                          **kwargs)
-
-        self.task = task
-
-    def __get_number_of_pixels(self, x) -> int:
-        B, _, H, W = x.shape
-        return B * H * W
-
-    def multitask_reconstruction_loss(self, x, x_hats):
-        return super().reconstruction_loss(x, x_hats[self.task])
-
-    def multitask_psnr(self, x, x_hats):
-        return peak_signal_noise_ratio(preds=x_hats[self.task] * 255,
-                                       target=x * 255,
-                                       data_range=255)
-
-    def multitask_ms_ssim(self, x, x_hats):
-        return ms_ssim(x * 255, x_hats[self.task] * 255, data_range=255)
-
-    def forward_input_heads(self, batch) -> torch.Tensor:
-        """
-        :param: batch - expected to be of the following form:
-                [torch_tensor_1_1, torch_tensor_2_1, ..., torch_tensor_B_1]
-
-        :returns: ([torch_tensor_1_1_hat, ..., torch_tensor_B_1_hat], {"y": y_likelihoods, "z": z_likelihoods})
-        """
-        batch_task_tensor = dict()
-        batch_task_tensor[self.task] = batch
-        stacked_task_embd = super().forward_input_heads(batch_task_tensor)
-
-        return stacked_task_embd

@@ -99,12 +99,6 @@ def transform_16bit_n_channel(n_channel=1):
         ])
 
 
-# from torchvision import get_image_backend, set_image_backend
-# import accimage
-# set_image_backend('accimage')
-import torchvision.io
-
-
 def default_loader(path):
     if '.npy' in path:
         return np.load(path)
@@ -221,6 +215,6 @@ def make_collate_fn(tasks: Union[List[str], str]) -> Callable:
                 ans[task].append(data_item)
 
             ans[task] = torch.stack(ans[task])
-        return ans if not single_task else ans[tasks]
+        return ans
 
     return my_collate_fn
