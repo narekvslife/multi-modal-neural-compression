@@ -94,11 +94,6 @@ def parse_args(argv):
     parser.add_argument(
         "--batch-size", type=int, default=16, help="Batch size (default: %(default)s)"
     )
-    parser.add_argument(
-        "--aux-learning-rate",
-        default=1e-3,
-        help="Auxiliary loss learning rate (default: %(default)s)",
-    )
 
     parser.add_argument("-w",
                         "--wandb-run-name",
