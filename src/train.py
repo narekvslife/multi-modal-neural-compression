@@ -176,7 +176,7 @@ def main(args):
     pl.seed_everything(21)
 
     t_string = "_".join(list(args.tasks))
-    wandb_run_name = f"{args.dataset}-{t_string}-{args.wandb_run_name}"
+    wandb_run_name = f"{'P' if args.pretrained else ''}{args.model}-l{args.latent_size}-q{args.quality}-{t_string}-{args.dataset}-{args.wandb_run_name}"
     wandb_logger = WandbLogger(name=wandb_run_name, project=WANDB_PROJECT_NAME, log_model="all")
 
     default_collate = make_collate_fn(args.tasks)
