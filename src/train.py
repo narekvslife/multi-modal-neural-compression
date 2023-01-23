@@ -202,18 +202,24 @@ def main(args):
                                                  collate=default_collate)
 
     if args.model == 1:
-        single_task_compressor = models.SingleTaskCompressor(ScaleHyperprior,
-                                                             task=args.tasks[0],
-                                                             input_channels=task_configs.task_parameters[args.tasks[0]]["out_channels"],
-                                                             latent_channels=args.latent_channels,
-                                                             conv_channels=args.conv_channels,
-                                                             pretrained=args.pretrained,
-                                                             quality=args.quality,
-                                                             lmbd=args.lmbda,
-                                                             learning_rate_main=args.learning_rate_main,
-                                                             learning_rate_aux=args.learning_rate_aux)
+        model_type = models.SingleTaskCompressor
+    elif args.model == 2:
+        model_type = models.MultiTaskMixedLatentCompressor
     else:
         raise NotImplementedError(f"Architecture number {args.model} is not available")
+
+    input_channels = tuple(task_configs.task_parameters[t]["out_channels"] for t in args.tasks)
+
+    compressor = model_type(compression_model_class=ScaleHyperprior,
+                            tasks=args.tasks,
+                            input_channels=input_channels,
+                            latent_channels=args.latent_channels,
+                            conv_channels=args.conv_channels,
+                            pretrained=args.pretrained,
+                            quality=args.quality,
+                            lmbd=args.lmbda,
+                            learning_rate_main=args.learning_rate_main,
+                            learning_rate_aux=args.learning_rate_aux)
 
     trainer = pl.Trainer(
         accelerator=args.accelerator,
@@ -227,7 +233,7 @@ def main(args):
                    LearningRateMonitor()]
     )
 
-    trainer.fit(model=single_task_compressor,
+    trainer.fit(model=compressor,
                 train_dataloaders=dataloader_train,
                 val_dataloaders=dataloader_val)
 

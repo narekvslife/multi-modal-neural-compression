@@ -435,8 +435,8 @@ class SingleTaskCompressor(MultiTaskMixedLatentCompressor):
     def __init__(
             self,
             compression_model_class: type,
-            task: Union[str, List[str]],
-            input_channels: int,
+            tasks: Tuple[str],
+            input_channels: Tuple[int],
             latent_channels: int,
             conv_channels: int,
             lmbda: float = 1,
@@ -452,9 +452,12 @@ class SingleTaskCompressor(MultiTaskMixedLatentCompressor):
         :param: input_channels - tuple with the number of channels of each task
         :param: latent_channels - number of channels in the latent space
         """
+
+        assert len(tasks) == 1
+
         super().__init__(compression_model_class=compression_model_class,
-                         tasks=(task,),
-                         input_channels=(input_channels, ),
+                         tasks=tasks,
+                         input_channels=input_channels,
                          conv_channels=conv_channels,
                          latent_channels=latent_channels,
                          lmbda=lmbda,
@@ -463,3 +466,35 @@ class SingleTaskCompressor(MultiTaskMixedLatentCompressor):
                          learning_rate_main=learning_rate_main,
                          learning_rate_aux=learning_rate_aux,
                          **kwargs)
+
+
+class MultiTaskSeparableLatentCompressor(MultiTaskMixedLatentCompressor):
+
+    def __init__(
+            self,
+            compression_model_class: type,
+            tasks: Tuple[str],
+            input_channels: Tuple[int],
+            latent_channels: int,
+            conv_channels: int,
+            lmbda: float = 1,
+            pretrained: bool = False,
+            quality: int = 4,
+            learning_rate_main=1e-5,
+            learning_rate_aux=1e-3,
+            **kwargs
+    ):
+        super().__init__(compression_model_class=compression_model_class,
+                         tasks=tasks,
+                         input_channels=input_channels,
+                         conv_channels=conv_channels,
+                         latent_channels=latent_channels,
+                         lmbda=lmbda,
+                         pretrained=pretrained,
+                         quality=quality,
+                         learning_rate_main=learning_rate_main,
+                         learning_rate_aux=learning_rate_aux,
+                         **kwargs)
+
+        def forward(self, batch) -> Tuple[Dict[str, torch.Tensor], Dict[str, torch.Tensor]]:
+            pass
