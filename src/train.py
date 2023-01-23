@@ -13,7 +13,7 @@ from torchvision.transforms import transforms
 
 import pytorch_lightning as pl
 from pytorch_lightning.loggers import WandbLogger
-from pytorch_lightning.callbacks import LearningRateMonitor
+from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
 
 from compressai.models import ScaleHyperprior
 
@@ -95,9 +95,15 @@ def parse_args(argv):
         "--batch-size", type=int, default=16, help="Batch size (default: %(default)s)"
     )
 
+    parser.add_argument("-l",
+                        "--latent-channels",
+                        required=True,
+                        type=int,
+                        help="Number of channels in the latent code (information bottleneck) of the network")
+
     parser.add_argument("-w",
                         "--wandb-run-name",
-                        default="",
+                        required=True,
                         help="additional name for the run")
 
     parser.add_argument("-m",
@@ -115,11 +121,13 @@ def parse_args(argv):
                         type=int,
                         help="Number of devices to use")
 
-    parser.add_argument("-l",
-                        "--latent-size",
-                        default=190,
+    parser.add_argument("-c",
+                        "--conv-channels",
+                        default=100,
                         type=int,
-                        help="Number of channels in the latent space")
+                        required=True,
+                        help="Number of channels in all convolutions of the network (except the layers right "
+                             "before and after the bottleneck)")
 
     parser.add_argument("-a",
                         "--accelerator",
@@ -163,7 +171,7 @@ def get_dataloader(dataset_name: str, batch_size: int, num_workers: int, collate
     else:
         raise NotImplementedError(f"Dataset {dataset_name} is not supported")
 
-    # dataset = Subset(dataset, range(16))
+    # dataset = Subset(dataset, range(2))
     dataloader = DataLoader(dataset=dataset,
                             batch_size=batch_size,
                             num_workers=num_workers,
@@ -175,9 +183,7 @@ def get_dataloader(dataset_name: str, batch_size: int, num_workers: int, collate
 def main(args):
     pl.seed_everything(21)
 
-    t_string = "_".join(list(args.tasks))
-    wandb_run_name = f"{'P' if args.pretrained else ''}{args.model}-l{args.latent_size}-q{args.quality}-{t_string}-{args.dataset}-{args.wandb_run_name}"
-    wandb_logger = WandbLogger(name=wandb_run_name, project=WANDB_PROJECT_NAME, log_model="all")
+    wandb_logger = WandbLogger(name=args.wandb_run_name, project=WANDB_PROJECT_NAME, log_model="all")
 
     default_collate = make_collate_fn(args.tasks)
 
@@ -197,7 +203,8 @@ def main(args):
         single_task_compressor = models.SingleTaskCompressor(ScaleHyperprior,
                                                              task=args.tasks[0],
                                                              input_channels=task_configs.task_parameters[args.tasks[0]]["out_channels"],
-                                                             latent_channels=args.latent_size,
+                                                             latent_channels=args.latent_channels,
+                                                             conv_channels=args.conv_channels,
                                                              pretrained=args.pretrained,
                                                              quality=args.quality,
                                                              lmbd=args.lmbda,
@@ -214,6 +221,7 @@ def main(args):
         enable_progress_bar=True,
         logger=wandb_logger,
         callbacks=[callbacks.LogPredictionSamplesCallback(wandb_logger=wandb_logger),
+                   ModelCheckpoint(every_n_epochs=50, filename=args.wandb_run_name),
                    LearningRateMonitor()]
     )
 

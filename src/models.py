@@ -1,4 +1,4 @@
-from typing import Tuple, Dict, Union
+from typing import Tuple, Dict, Union, List
 
 import torch
 import torch.nn as nn
@@ -32,6 +32,7 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
             tasks: Tuple[str],
             input_channels: Tuple[int],
             latent_channels: int,
+            conv_channels: int,
             lmbda: float = 1,
             pretrained: bool = False,
             quality: int = 4,
@@ -43,8 +44,12 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
         :param: compression_model_class - type of the backbone compresion model
         :param: tasks - list of task names
         :param: input_channels - tuple with the number of channels of each task
-        :param: latent_channels - number of channels in the latent space
-        :param: lmbda - multiplier of the compression loss in the total loss
+        :param: conv_channels - number of channels in the convolutions of each input head.
+                                which means that the compressor backbone get len(tasks) * conv_channels inputs as input
+        :param: latent_channels - number of channels in the latent code (M)
+        :param: lmbda - multiplier of the reconstruction loss in the total loss
+        :param: pretrained - whether to use pretrained backbone compressor
+        :param: quality - quality of the pretrained compressor
 =        """
         super().__init__()
         self.save_hyperparameters()
@@ -57,6 +62,7 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
         assert self.n_tasks == len(self.input_channels)
 
         self.latent_channels = latent_channels
+        self.conv_channels = conv_channels
 
         self.lmbda = lmbda
 
@@ -122,8 +128,7 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
 
     def __get_compression_network(self, N: int, M: int) -> nn.Module:
         """
-
-        :param N: - number of input channels to the compression model
+        :param N: - number of channels for each convolution layer channels to the compression model
         :param M: - number of latent channels that later will be compressed
         :return:
         """
@@ -147,10 +152,13 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
             print(f"Note that the pretrained {self.compression_model_class} has a fixed latent size M={model.M}, "
                   f"which is different from the specified M={M}")
 
-        # this is the part that i have to deal with because in the compressai models
-        # the default input and output dimensions is a hardcoded 3, rather than N!
-        model.g_a[0] = conv(N, model.N)
-        model.g_s[-1] = deconv(model.N, N)
+        # This is the part that i have to deal with because in the CompressAI models
+        # the default input and output dimensions is a hardcoded 3
+
+        # Note that we multiply by the number of tasks, because we will have N channels from each encoder head
+        # and should provide N channels for each decoder head
+        model.g_a[0] = conv(N * self.n_tasks, model.N)
+        model.g_s[-1] = deconv(model.N, N * self.n_tasks)
 
         return model
 
@@ -166,23 +174,16 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
         """
 
         model = nn.ModuleDict()
-        # We chose a 1/2 of the size of the latent to be the sum of the channels of the input specific embeddings
-        # which means that each task t_i gets: latent_channels // 2 // self.n_tasks channels
-
-        # !Note! that there is no particular reason for this choice other then the automatic
-        # control of the latent size to be discrete and always equal for all tasks
-        # TODO: maybe change this idk...
-        t_i_channels: int = self.latent_channels // 2 // self.n_tasks
 
         # first we need to build the task-specific input heads
         model["input_heads"] = self.__build_heads(input_channels=self.input_channels,
-                                                  output_channels=t_i_channels)
+                                                  output_channels=self.conv_channels)
 
-        total_task_channels = t_i_channels * self.n_tasks
+        # these task-specific channels are stacked and passed to the default CompressAI model
+        model["compressor"] = self.__get_compression_network(N=self.conv_channels,
+                                                             M=self.latent_channels)
 
-        # these task-specific are stacked and passed to the default compressai model
-        model["compressor"] = self.__get_compression_network(N=total_task_channels, M=self.latent_channels)
-
+        total_task_channels = self.conv_channels * self.n_tasks
         # now that mixed representations should be passed to task-specific output heads
         model["output_heads"] = self.__build_heads(total_task_channels, self.input_channels, is_deconv=True)
 
@@ -207,7 +208,7 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
         # we now concatenate them at the channel dimensions to pass through the compressor backbone
         return torch.concat(t_is, dim=1)
 
-    def forward_output_heads(self, batch) -> torch.Tensor:
+    def forward_output_heads(self, batch) -> Dict[str, torch.Tensor]:
         """
         :param: batch - expected to be of the shape (B, sum(task_channels), W, H)
 
@@ -220,8 +221,10 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
                 }
         """
         x_hats = {}
+
         for task_n, task in enumerate(self.tasks):
             x_hats[task] = self.model["output_heads"][task_n](batch)
+
         return x_hats
 
     def forward(self, batch) -> Tuple[Dict[str, torch.Tensor], Dict[str, torch.Tensor]]:
@@ -391,15 +394,16 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
 
     def configure_optimizers(self):
         main_optimizer = torch.optim.Adam(self.get_main_parameters(), lr=self.learning_rate_main)
-        lr_schedulers = {"scheduler": ReduceLROnPlateau(main_optimizer,
-                                                        threshold=0.2,
-                                                        factor=0.5,
-                                                        min_lr=1e-9,
-                                                        mode="min"),
-                         "monitor": ["train_loss", "val_loss"]}
+        # lr_schedulers = {"scheduler": ReduceLROnPlateau(main_optimizer,
+        #                                                 threshold=0.2,
+        #                                                 factor=0.5,
+        #                                                 min_lr=1e-9,
+        #                                                 mode="min"),
+        #                  "monitor": ["train_loss", "val_loss"]}
 
         auxilary_optimizer = torch.optim.Adam(self.get_auxilary_parameters(), lr=self.learning_rate_aux)
-        return {"optimizer": main_optimizer, "scheduler": lr_schedulers}, {"optimizer": auxilary_optimizer}
+        # return {"optimizer": main_optimizer, "scheduler": lr_schedulers}, {"optimizer": auxilary_optimizer}
+        return {"optimizer": main_optimizer}, {"optimizer": auxilary_optimizer}
 
     def update_bottleneck_quantiles(self):
         self.model["compressor"].entropy_bottleneck.update()
@@ -431,9 +435,10 @@ class SingleTaskCompressor(MultiTaskMixedLatentCompressor):
     def __init__(
             self,
             compression_model_class: type,
-            task: str,
+            task: Union[str, List[str]],
             input_channels: int,
             latent_channels: int,
+            conv_channels: int,
             lmbda: float = 1,
             pretrained: bool = False,
             quality: int = 4,
@@ -450,6 +455,7 @@ class SingleTaskCompressor(MultiTaskMixedLatentCompressor):
         super().__init__(compression_model_class=compression_model_class,
                          tasks=(task,),
                          input_channels=(input_channels, ),
+                         conv_channels=conv_channels,
                          latent_channels=latent_channels,
                          lmbda=lmbda,
                          pretrained=pretrained,
