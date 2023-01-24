@@ -32,7 +32,7 @@ class LogPredictionSamplesCallback(Callback):
             if trainer.global_step < 100:
                 self.wandb_logger.log_image(
                     key=f'{directory}/{task}/target',
-                    images=[x for x in x_hats_task])
+                    images=[x for x in batch[task]])
 
     def on_train_batch_start(
         self, trainer: "pl.Trainer", pl_module: "pl.LightningModule", batch: Any, batch_idx: int

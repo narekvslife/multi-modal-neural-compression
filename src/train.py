@@ -173,7 +173,7 @@ def get_dataloader(dataset_name: str, batch_size: int, num_workers: int, collate
     else:
         raise NotImplementedError(f"Dataset {dataset_name} is not supported")
 
-    # dataset = Subset(dataset, range(2))
+    dataset = Subset(dataset, range(2))
     dataloader = DataLoader(dataset=dataset,
                             batch_size=batch_size,
                             num_workers=num_workers,
@@ -215,9 +215,8 @@ def main(args):
                             input_channels=input_channels,
                             latent_channels=args.latent_channels,
                             conv_channels=args.conv_channels,
-                            pretrained=args.pretrained,
                             quality=args.quality,
-                            lmbd=args.lmbda,
+                            lmbda=args.lmbda,
                             learning_rate_main=args.learning_rate_main,
                             learning_rate_aux=args.learning_rate_aux)
 

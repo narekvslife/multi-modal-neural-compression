@@ -67,6 +67,7 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
         self.lmbda = lmbda
 
         self.pretrained = pretrained
+        print(self.pretrained)
 
         self.automatic_optimization = False
 
