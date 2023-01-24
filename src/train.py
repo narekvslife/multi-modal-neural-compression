@@ -1,4 +1,4 @@
-
+import os
 import sys
 import argparse
 
@@ -184,7 +184,11 @@ def get_dataloader(dataset_name: str, batch_size: int, num_workers: int, collate
 def main(args):
     pl.seed_everything(21)
 
-    wandb_logger = WandbLogger(name=args.wandb_run_name, project=WANDB_PROJECT_NAME, log_model="all")
+    wandb_logger = WandbLogger(name=args.wandb_run_name,
+                               project=WANDB_PROJECT_NAME,
+                               log_model="all",
+                               id=args.wandb_run_name,  # for this to work WANDB_RUN_ID should be set in environ
+                               resume="allow",)
 
     default_collate = make_collate_fn(args.tasks)
 
