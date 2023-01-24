@@ -83,6 +83,8 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
         if self.pretrained:
             print("Note that pretrained models have fixed size of latents, independent of specified 'latent_channels'")
 
+        self.metrics = ["psnr", "ms-ssim"]
+
     def __build_heads(self,
                       input_channels: Union[Tuple[int], int],
                       output_channels: Union[Tuple[int], int],
@@ -262,7 +264,7 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
 
         return x_hats, stacked_t_likelihoods
 
-    def reconstruction_loss(self, x, x_hat, loss_type: str = "mse") -> torch.Tensor:
+    def reconstruction_loss(self, x_hat, x, loss_type: str = "mse") -> torch.Tensor:
         """
         Given a batch of images, this function returns the reconstruction loss
 
@@ -287,28 +289,33 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
 
         return loss
 
-    # TODO: the loss/metric functions below should be merged into one function, the code is copy-pasted
-    def multitask_reconstruction_loss(self, x, x_hats):
-        reconstruction_loss = 0
+    def multitask_loss(self, x, x_hats, loss_type: str, log_dir: str):
+
+        if loss_type == "mse":
+            loss_function = self.reconstruction_loss
+            value_multiplier = 1
+            kwargs = {}
+        elif loss_type == "psnr":
+            loss_function = peak_signal_noise_ratio
+            value_multiplier = 255
+            kwargs = {"data_range": 255}
+        elif loss_type == "ms-ssim":
+            loss_function = ms_ssim
+            value_multiplier = 255
+            kwargs = {"data_range": 255}
+        else:
+            raise NotImplementedError("Loss should be one of {mse, psnr, ms-ssim}")
+
+        total_loss = 0
+        logs = {}
+
         for task in self.tasks:
-            reconstruction_loss += self.reconstruction_loss(x=x[task],
-                                                            x_hat=x_hats[task],
-                                                            loss_type="mse")
-        return reconstruction_loss / self.n_tasks
+            loss_value = loss_function(x_hats[task] * value_multiplier, x[task] * value_multiplier, **kwargs)
+            logs[f"{log_dir}/{task}/{loss_type}"] = loss_value
 
-    def multitask_psnr(self, x, x_hats):
-        psnr = 0
-        for task in self.tasks:
-            psnr += peak_signal_noise_ratio(x_hats[task] * 255, x[task] * 255, data_range=255)
+            total_loss += loss_value
 
-        return psnr / self.n_tasks
-
-    def multitask_ms_ssim(self, x, x_hats):
-        msssim = 0
-        for task in self.tasks:
-            msssim += ms_ssim(x_hats[task] * 255, x[task] * 255, data_range=255)
-
-        return msssim / self.n_tasks
+        return total_loss / self.n_tasks, logs
 
     def __get_number_of_pixels(self, x_hats) -> int:
         B, _, H, W = torch.stack([torch.tensor(x_hats[task].shape) for task in self.tasks]).sum(0)
@@ -335,12 +342,17 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
 
         x_hats, likelihoods = self.forward(batch)
 
-        rec_loss = self.multitask_reconstruction_loss(x=batch, x_hats=x_hats)
+        rec_loss, rec_logs = self.multitask_loss(x=batch, x_hats=x_hats, loss_type="mse", log_dir="train")
 
         compression_loss = self.compression_loss(likelihoods=likelihoods,
                                                  num_pixels=self.__get_number_of_pixels(x_hats))
 
         loss = self.lmbda * rec_loss + compression_loss
+
+        log_dict = {
+            "train/mse": rec_loss,
+            "train/compression_loss": compression_loss,
+            "train/loss": loss}
 
         main_opt.zero_grad()
         self.manual_backward(loss)
@@ -348,19 +360,18 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
 
         aux_loss = self.model["compressor"].entropy_bottleneck.loss()
 
+        log_dict["train/aux_loss"] = aux_loss
+
         aux_opt.zero_grad()
         self.manual_backward(loss=aux_loss)
         aux_opt.step()
 
-        log_dict = {
-            "train/rec_loss": rec_loss,
-            "train/compression_loss": compression_loss,
-            "train/loss": loss,
-            "train/psnr": self.multitask_psnr(x=batch, x_hats=x_hats),
-            "train/ms-ssim": self.multitask_ms_ssim(x=batch, x_hats=x_hats),
-
-            "aux/loss": aux_loss,
-        }
+        for metric in self.metrics:
+            average_value, logs = self.multitask_loss(x=batch, x_hats=x_hats, loss_type=metric, log_dir="train")
+            # log averaged metric values
+            log_dict[f"train/{metric}"] = average_value
+            # add per-task metric values
+            log_dict.update(logs)
 
         self.log_dict(log_dict, on_step=True, on_epoch=False, sync_dist=True)
 
@@ -369,20 +380,25 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         x_hats, likelihoods = self.forward(batch)
 
-        rec_loss = self.multitask_reconstruction_loss(x=batch, x_hats=x_hats)
+        rec_loss, rec_logs = self.multitask_loss(x=batch, x_hats=x_hats, loss_type="mse", log_dir="val")
 
         compression_loss = self.compression_loss(likelihoods=likelihoods,
                                                  num_pixels=self.__get_number_of_pixels(x_hats))
 
-        loss = rec_loss + self.lmbda * compression_loss
+        loss = self.lmbda * rec_loss + compression_loss
 
         log_dict = {
             "val/rec_loss": rec_loss,
             "val/compression_loss": compression_loss,
             "val/loss": loss,
-            "val/psnr": self.multitask_psnr(x=batch, x_hats=x_hats),
-            "val/ms_ssim": self.multitask_ms_ssim(x=batch, x_hats=x_hats)
         }
+
+        for metric in self.metrics:
+            average_value, logs = self.multitask_loss(x=batch, x_hats=x_hats, loss_type=metric, log_dir="val")
+            # log averaged metric values
+            log_dict[f"val/{metric}"] = average_value
+            # add per-task metric values
+            log_dict.update(logs)
 
         self.log_dict(log_dict, on_step=False, on_epoch=True, sync_dist=True)
         return loss
@@ -498,4 +514,6 @@ class MultiTaskSeparableLatentCompressor(MultiTaskMixedLatentCompressor):
                          **kwargs)
 
         def forward(self, batch) -> Tuple[Dict[str, torch.Tensor], Dict[str, torch.Tensor]]:
+
+            # todo: Note also different compression losses. I think they should be separated by channels
             pass
