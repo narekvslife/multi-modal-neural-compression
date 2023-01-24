@@ -354,6 +354,8 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
             "train/compression_loss": compression_loss,
             "train/loss": loss}
 
+        log_dict.update(rec_logs)
+
         main_opt.zero_grad()
         self.manual_backward(loss)
         main_opt.step()
@@ -392,6 +394,8 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
             "val/compression_loss": compression_loss,
             "val/loss": loss,
         }
+
+        log_dict.update(rec_logs)
 
         for metric in self.metrics:
             average_value, logs = self.multitask_loss(x=batch, x_hats=x_hats, loss_type=metric, log_dir="val")
