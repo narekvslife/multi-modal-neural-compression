@@ -27,11 +27,55 @@ from constants import (WANDB_PROJECT_NAME, MNIST, FASHION_MNIST, CLEVR)
 
 def parse_args(argv):
     parser = argparse.ArgumentParser(description="Example training script.")
+
+    parser.add_argument(
+        "-d",
+        "--dataset",
+        type=str,
+        required=True,
+        help="Training dataset"
+    )
+
+    parser.add_argument("-t",
+                        "--tasks",
+                        required=True,
+                        nargs='+',
+                        type=str,
+                        help="Task(s) that will be used")
+
+    parser.add_argument("-m",
+                        "--model",
+                        required=True,
+                        type=int,
+                        choices=range(1, 5),
+                        help="Which type of the model to choose:"
+                             "1 - SingleTask, 2 - MixedLatentMultitask, "
+                             "3 - SeparateLatentMultitask, 4 - SharedSeparateLatentMultitask")
+
+    parser.add_argument("-l",
+                        "--latent-channels",
+                        required=True,
+                        type=int,
+                        help="Number of channels in the latent code (information bottleneck) of the network")
+
+    parser.add_argument("-c",
+                        "--conv-channels",
+                        default=100,
+                        type=int,
+                        required=True,
+                        help="Number of channels in all convolutions of the network (except the layers right "
+                             "before and after the bottleneck)")
+
+    parser.add_argument("-w",
+                        "--wandb-run-name",
+                        required=True,
+                        help="additional name for the run")
+
     parser.add_argument(
         "-p",
         "--pretrained",
         type=bool,
-        default=True,
+        default=False,
         help="Whether to use pretrained backbone or not",
     )
     parser.add_argument("-q",
@@ -41,20 +85,6 @@ def parse_args(argv):
                         choices=range(1, 9),
                         help="Quality of the pretrained model (bigger models have bigger latent size 192 vs 320")
 
-    parser.add_argument("-t",
-                        "--tasks",
-                        required=True,
-                        nargs='+',
-                        type=str,
-                        help="Task(s) that will be used")
-
-    parser.add_argument(
-        "-d",
-        "--dataset",
-        type=str,
-        required=True,
-        help="Training dataset"
-    )
     parser.add_argument(
         "-e",
         "--epochs",
@@ -95,39 +125,11 @@ def parse_args(argv):
         "--batch-size", type=int, default=16, help="Batch size (default: %(default)s)"
     )
 
-    parser.add_argument("-l",
-                        "--latent-channels",
-                        required=True,
-                        type=int,
-                        help="Number of channels in the latent code (information bottleneck) of the network")
-
-    parser.add_argument("-w",
-                        "--wandb-run-name",
-                        required=True,
-                        help="additional name for the run")
-
-    parser.add_argument("-m",
-                        "--model",
-                        required=True,
-                        type=int,
-                        choices=range(1, 5),
-                        help="Which type of the model to choose:"
-                             "1 - SingleTask, 2 - MixedLatentMultitask, "
-                             "3 - SeparateLatentMultitask, 4 - SharedSeparateLatentMultitask")
-
     parser.add_argument("-g",
                         "--devices",
                         default=1,
                         type=int,
                         help="Number of devices to use")
-
-    parser.add_argument("-c",
-                        "--conv-channels",
-                        default=100,
-                        type=int,
-                        required=True,
-                        help="Number of channels in all convolutions of the network (except the layers right "
-                             "before and after the bottleneck)")
 
     parser.add_argument("-a",
                         "--accelerator",
