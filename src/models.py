@@ -22,7 +22,7 @@ from compressai.models.utils import conv, deconv
 
 from datasets.task_configs import task_parameters
 
-from loss_balancing import UncertaintyWeightingStrategy
+from loss_balancing import UncertaintyWeightingStrategy, NoWeightingStrategy
 
 
 class MultiTaskMixedLatentCompressor(pl.LightningModule):
@@ -269,7 +269,6 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
 
         stacked_t = self.forward_input_heads(batch)
 
-        # now pass through the main compressor network
         stacked_t_preds = self.model["compressor"](stacked_t)
 
         stacked_t_hat = stacked_t_preds["x_hat"]
@@ -298,7 +297,7 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
             # and over channels so that images with different channels have the same effect
             loss = loss.sum(dim=[1, 2, 3]).mean(dim=[0]) / x.shape[1]
         elif loss_type == "cross-entropy":
-            loss = F.cross_entropy(x, x_hat, reduction="mean")
+            loss = F.cross_entropy(input=x_hat, target=x.squeeze(1).long(), reduction="mean")
         elif loss_type == "l1":
             raise NotImplementedError("l1 not implemented yet")
         elif loss_type == "ms-ssim":
@@ -314,7 +313,6 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
         logs = dict()
 
         for task in self.tasks:
-
             loss_name = task_parameters[task]["loss_function"]
             task_losses[task] = self.reconstruction_loss(x=x[task],
                                                          x_hat=x_hats[task],
@@ -335,6 +333,12 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
         logs = {}
         for metric_name, metric_function in self.metrics.items():
             for task in self.tasks:
+                print(x_hats[task].shape, x[task].shape)
+
+                if task == "semantic":
+                    value_multiplier = 1
+                    data_range = 17
+
                 value = metric_function(x_hats[task] * value_multiplier,
                                         x[task] * value_multiplier,
                                         data_range=value_multiplier)
@@ -394,7 +398,7 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
         self.manual_backward(loss=aux_loss)
         aux_opt.step()
 
-        metric_logs = self.average_metric(x=batch, x_hats=x_hats, log_dir="train")
+        metric_logs = self.average_metrics(x=batch, x_hats=x_hats, log_dir="train")
 
         log_dict.update(metric_logs)
 
@@ -420,7 +424,7 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
 
         log_dict.update(rec_logs)
 
-        metric_logs = self.average_metric(x=batch, x_hats=x_hats, log_dir="val")
+        metric_logs = self.average_metrics(x=batch, x_hats=x_hats, log_dir="val")
 
         log_dict.update(metric_logs)
 
@@ -509,7 +513,7 @@ class SingleTaskCompressor(MultiTaskMixedLatentCompressor):
                          **kwargs)
 
         # we don't need any multi-task loss balancing when we only have a single loss
-        self.loss_balancer = lambda x: x
+        self.loss_balancer = NoWeightingStrategy()
 
 
 class MultiTaskSeparableLatentCompressor(MultiTaskMixedLatentCompressor):

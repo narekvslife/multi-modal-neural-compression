@@ -5,6 +5,8 @@
 # LICENSE file in the root directory of this source tree.
 import os
 
+from time import sleep
+
 from PIL import Image
 import numpy as np
 import torch
@@ -12,6 +14,9 @@ import torchvision.transforms as transforms
 from typing import Optional, List, Tuple, Dict, Union, Callable
 
 from . import task_configs
+
+from torchvision.transforms.functional import InterpolationMode
+
 
 try:
     import accimage
@@ -53,8 +58,10 @@ def get_transform(task: str, image_size=Optional[int]):
             MAKE_RESCALE_0_MAX_0_POS1(maxx)])
 
     if image_size is not None:
+        resize = transforms.Resize(image_size) if task not in ['semantic'] else transforms.Resize(image_size, interpolation=InterpolationMode.NEAREST)
+
         transform = transforms.Compose([
-            transforms.Resize(image_size),
+            resize,
             transform])
 
     return transform
@@ -62,14 +69,17 @@ def get_transform(task: str, image_size=Optional[int]):
 
 pil_to_np = lambda img: np.array(img)
 
-# For semantic segmentation
-transform_dense_labels = lambda img: torch.Tensor(np.array(img)).long()  # avoids normalizing
 
-# Transforms to a 3-channel tensor and then changes [0,1] -> [-1, 1]
+# For semantic segmentation
+def transform_dense_labels(img):
+    img = pil_to_np(img)
+    img = torch.from_numpy(img.transpose((2, 0, 1))).contiguous()
+    return img
+
+
 transform_8bit = transforms.Compose([
     pil_to_np,
     transforms.ToTensor(),
-    #         MAKE_RESCALE_0_1_NEG1_POS1(3),
 ])
 
 

@@ -10,6 +10,18 @@ import torch
 import torch.nn as nn
 
 
+class NoWeightingStrategy(nn.Module):
+    """
+    No weighting strategy
+    """
+
+    def __init__(self, **kwargs):
+        super(NoWeightingStrategy, self).__init__()
+
+    def forward(self, task_losses):
+        return task_losses
+
+
 class UncertaintyWeightingStrategy(nn.Module):
     """
         Uncertainty weighting strategy for a multitask loss

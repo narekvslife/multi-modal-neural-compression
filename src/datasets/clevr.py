@@ -1,7 +1,9 @@
 import os
+from time import sleep
 
 from typing import List
 
+import torch
 import torch.utils.data as data
 
 from .transforms import default_loader, get_transform
@@ -10,23 +12,8 @@ NUM_TRAIN = 50000
 NUM_VAL = 5000
 NUM_TEST = 5000
 EXT_DICT = {
-    'curvature_meshes': 'ply',
     'depth_euclidean': 'png',
-    'depth_zbuffer': 'png',
-    'edge_occlusion': 'png',
-    'edge_texture': 'png',
-    'keypoints2d': 'png',
-    'keypoints3d': 'png',
-    'normal': 'png',
-    'obj': 'obj',
-    'ply': 'ply',
-    'point_info': 'json',
-    'principal_curvature': 'png',
-    'reshading': 'png',
     'rgb': 'png',
-    'sceneinfo': 'json',
-    'segment_unsup25d': 'png',
-    'segment_unsup2d': 'png',
     'semantic': 'png'
 }
 
@@ -52,6 +39,9 @@ class CLEVRDataset(data.Dataset):
         self.split = split
         self.tasks = tasks
         self.image_size = image_size
+
+        # for clevr semantic - suprrisingly enough these class numbers were selected...
+        self.__sem1_classes = (0, 1, 2, 3 ,4, 5, 6, 7, 10, 11, 12, 13, 14, 15, 16, 17, 255)
 
     def __len__(self):
         if self.split == 'train':
@@ -80,8 +70,14 @@ class CLEVRDataset(data.Dataset):
                 # G = color + 10 * material = material,color
                 # B = instance
                 x = x[1]  # for now, let's only consider material_color as the semantic mask
+
+                for i, class_ in enumerate(self.__sem1_classes):
+                    x[x == class_] = i
+
+                x = x.unsqueeze(0).float()
             elif task == 'reshading':
                 x = x[[0]]
+            
             task_dict[task] = x
 
         return task_dict
