@@ -22,6 +22,12 @@ task_parameters = {
         'out_channels': 17,
         'loss_function': 'cross-entropy'
     },
+    'normal': {
+        'in_channels': 3,
+        'out_channels': 3,
+        'mask_val': 0.502,
+        'loss_function': 'mse'
+    },
 }
 
 PIX_TO_PIX_TASKS = ['colorization', 'edge_texture', 'edge_occlusion', 'keypoints3d', 'keypoints2d', 'reshading',

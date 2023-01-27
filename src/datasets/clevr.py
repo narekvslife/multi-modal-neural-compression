@@ -12,6 +12,7 @@ NUM_TEST = 5000
 EXT_DICT = {
     'depth_euclidean': 'png',
     'rgb': 'png',
+    'normal': 'png',
     'semantic': 'png'
 }
 SEM1_CLASSES = (0, 1, 2, 3, 4, 5, 6, 7, 10, 11, 12, 13, 14, 15, 16, 17, 255)
