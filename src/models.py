@@ -94,10 +94,10 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
 
         self.model: nn.ModuleDict = self._build_model()
 
-        self.metrics = {"psnr": peak_signal_noise_ratio,
-                        "ms-ssim": ms_ssim}
-
         self.loss_balancer = UncertaintyWeightingStrategy(self.n_tasks)
+
+        # TODO: move this to config
+        self.metrics = {"psnr": peak_signal_noise_ratio, "ms-ssim": ms_ssim}
 
     def __build_heads(self,
                       input_channels: Union[Tuple[int], int],
@@ -328,22 +328,26 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
 
     def average_metrics(self, x, x_hats, log_dir: str) -> Dict[str, float]:
 
-        value_multiplier = 255
-
         logs = {}
         for metric_name, metric_function in self.metrics.items():
             for task in self.tasks:
-                print(x_hats[task].shape, x[task].shape)
 
+                task_prediction = x_hats[task]
+                task_target = x[task]
+
+                # TODO: move this to some general config
                 if task == "semantic":
                     value_multiplier = 1
-                    data_range = 17
+                    data_range = 17  # think maybe it makes sense to make this 255 since we use the image as a png anyway..?
+                    task_prediction = torch.argmax(task_prediction, dim=1).unsqueeze(1).float()
+                    task_target = task_target
+                else:
+                    value_multiplier = 255
+                    data_range = 255
 
-                value = metric_function(x_hats[task] * value_multiplier,
-                                        x[task] * value_multiplier,
-                                        data_range=value_multiplier)
-
-                logs[f"{log_dir}/{task}/{metric_name}"] = value
+                logs[f"{log_dir}/{task}/{metric_name}"] = metric_function(task_prediction * value_multiplier,
+                                                                          task_target * value_multiplier,
+                                                                          data_range=data_range)
 
         return logs
 

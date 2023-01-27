@@ -24,15 +24,31 @@ class LogPredictionSamplesCallback(Callback):
         for task in pl_module.tasks:
             x_hats_task = x_hats[task]
 
-            self.wandb_logger.log_image(
-                key=f'{directory}/{task}/predicted',
-                images=[xh for xh in x_hats_task])
+            pred_key = f'{directory}/{task}/predicted'
+            target_key = f'{directory}/{task}/target'
 
-            # show target only once
+            kwargs = {}
+            if task == "semantic":
+                pred_images = target_images = [torch.zeros(xh[0].shape) for xh in x_hats_task]  # log black images
+                kwargs["masks"] = [{"predictions": {"mask_data": torch.argmax(xh, dim=0).cpu().numpy()}} for xh in x_hats_task]
+            else:
+                pred_images = [xh for xh in x_hats_task]
+                target_images = [x for x in batch[task]]
+
+            self.wandb_logger.log_image(key=pred_key,
+                                        images=pred_images,
+                                        **kwargs)
+
+            # log target only once
             if trainer.global_step < 100:
+                kwargs = {}
+                if task == "semantic":
+                    kwargs["masks"] = [{"ground_truth": {"mask_data": x.cpu().numpy()}} for x in batch[task].squeeze(1)]
+
                 self.wandb_logger.log_image(
-                    key=f'{directory}/{task}/target',
-                    images=[x for x in batch[task]])
+                    key=target_key,
+                    images=target_images,
+                    **kwargs)
 
     def on_train_batch_start(
         self, trainer: "pl.Trainer", pl_module: "pl.LightningModule", batch: Any, batch_idx: int

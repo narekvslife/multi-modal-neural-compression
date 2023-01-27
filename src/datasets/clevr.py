@@ -1,9 +1,7 @@
 import os
-from time import sleep
 
 from typing import List
 
-import torch
 import torch.utils.data as data
 
 from .transforms import default_loader, get_transform
@@ -16,6 +14,7 @@ EXT_DICT = {
     'rgb': 'png',
     'semantic': 'png'
 }
+SEM1_CLASSES = (0, 1, 2, 3, 4, 5, 6, 7, 10, 11, 12, 13, 14, 15, 16, 17, 255)
 
 
 class CLEVRDataset(data.Dataset):
@@ -39,9 +38,6 @@ class CLEVRDataset(data.Dataset):
         self.split = split
         self.tasks = tasks
         self.image_size = image_size
-
-        # for clevr semantic - suprrisingly enough these class numbers were selected...
-        self.__sem1_classes = (0, 1, 2, 3 ,4, 5, 6, 7, 10, 11, 12, 13, 14, 15, 16, 17, 255)
 
     def __len__(self):
         if self.split == 'train':
@@ -71,7 +67,7 @@ class CLEVRDataset(data.Dataset):
                 # B = instance
                 x = x[1]  # for now, let's only consider material_color as the semantic mask
 
-                for i, class_ in enumerate(self.__sem1_classes):
+                for i, class_ in enumerate(SEM1_CLASSES):
                     x[x == class_] = i
 
                 x = x.unsqueeze(0).float()
