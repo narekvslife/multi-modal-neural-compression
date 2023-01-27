@@ -74,6 +74,12 @@ class CLEVRDataset(data.Dataset):
                 x = x[:2]
             elif task == 'rgb':
                 x = x[:3]
+            elif task == 'semantic':
+                # for CLEVR the semseg image is a 3-channel image
+                # R = shape + 10 * size = size,shape
+                # G = color + 10 * material = material,color
+                # B = instance
+                x = x[1]  # for now, let's only consider material_color as the semantic mask
             elif task == 'reshading':
                 x = x[[0]]
             task_dict[task] = x

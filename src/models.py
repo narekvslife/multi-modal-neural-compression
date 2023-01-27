@@ -1,4 +1,10 @@
-from typing import Tuple, Dict, Union, List
+# Copyright (c) EPFL VILAB.
+# All rights reserved.
+
+# This source code is licensed under the license found in the
+# LICENSE file in the root directory of this source tree.
+
+from typing import Tuple, Dict, Union
 
 import torch
 import torch.nn as nn
@@ -8,12 +14,15 @@ import pytorch_lightning as pl
 from compressai.models import ScaleHyperprior
 
 from pytorch_msssim import ms_ssim
-from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torchmetrics.functional.image.psnr import peak_signal_noise_ratio
 
 from compressai.layers import GDN
 from compressai.zoo import bmshj2018_hyperprior
 from compressai.models.utils import conv, deconv
+
+from datasets.task_configs import task_parameters
+
+from loss_balancing import UncertaintyWeightingStrategy
 
 
 class MultiTaskMixedLatentCompressor(pl.LightningModule):
@@ -31,6 +40,7 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
             compression_model_class: type,
             tasks: Tuple[str],
             input_channels: Tuple[int],
+            output_channels: Tuple[int],
             latent_channels: int,
             conv_channels: int,
             lmbda: float = 1,
@@ -50,14 +60,16 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
         :param: lmbda - multiplier of the reconstruction loss in the total loss
         :param: pretrained - whether to use pretrained backbone compressor
         :param: quality - quality of the pretrained compressor
-=        """
+        """
         super().__init__()
         self.save_hyperparameters()
         self.compression_model_class = compression_model_class
 
         self.tasks = tasks
         self.n_tasks = len(self.tasks)
+
         self.input_channels = input_channels
+        self.output_channels = output_channels
 
         assert self.n_tasks == len(self.input_channels)
 
@@ -67,7 +79,9 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
         self.lmbda = lmbda
 
         self.pretrained = pretrained
-        print(self.pretrained)
+
+        if self.pretrained:
+            print("Note that pretrained models have fixed size of latents, independent of specified 'latent_channels'")
 
         self.automatic_optimization = False
 
@@ -80,10 +94,10 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
 
         self.model: nn.ModuleDict = self._build_model()
 
-        if self.pretrained:
-            print("Note that pretrained models have fixed size of latents, independent of specified 'latent_channels'")
+        self.metrics = {"psnr": peak_signal_noise_ratio,
+                        "ms-ssim": ms_ssim}
 
-        self.metrics = ["psnr", "ms-ssim"]
+        self.loss_balancer = UncertaintyWeightingStrategy(self.n_tasks)
 
     def __build_heads(self,
                       input_channels: Union[Tuple[int], int],
@@ -158,10 +172,8 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
         # This is the part that i have to deal with because in the CompressAI models
         # the default input and output dimensions is a hardcoded 3
 
-        # Note that we multiply by the number of tasks, because we will have N channels from each encoder head
-        # and should provide N channels for each decoder head
-        model.g_a[0] = conv(N * self.n_tasks, model.N)
-        model.g_s[-1] = deconv(model.N, N * self.n_tasks)
+        model.g_a[0] = conv(N, model.N)
+        model.g_s[-1] = deconv(model.N, N)
 
         return model
 
@@ -182,13 +194,17 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
         model["input_heads"] = self.__build_heads(input_channels=self.input_channels,
                                                   output_channels=self.conv_channels)
 
+        # Note that we multiply self.conv_channels by the number of tasks,
+        # because we will have self.conv_channels channels from each encoder head
+        # and should provide N channels for each decoder head
+        total_task_channels = self.conv_channels * self.n_tasks
+
         # these task-specific channels are stacked and passed to the default CompressAI model
-        model["compressor"] = self.__get_compression_network(N=self.conv_channels,
+        model["compressor"] = self.__get_compression_network(N=total_task_channels,
                                                              M=self.latent_channels)
 
-        total_task_channels = self.conv_channels * self.n_tasks
         # now that mixed representations should be passed to task-specific output heads
-        model["output_heads"] = self.__build_heads(total_task_channels, self.input_channels, is_deconv=True)
+        model["output_heads"] = self.__build_heads(total_task_channels, self.output_channels, is_deconv=True)
 
         return model
 
@@ -259,7 +275,7 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
         stacked_t_hat = stacked_t_preds["x_hat"]
         stacked_t_likelihoods = stacked_t_preds["likelihoods"]  # {"y": y_likelihoods, "z": z_likelihoods}
 
-        # {"task1": [torch_tensor_1_1_hat, ..., torch_tensor_B_1_hat], ... }
+        # x_hats = {"task1": [torch_tensor_1_1_hat, ..., torch_tensor_B_1_hat], ... }
         x_hats = self.forward_output_heads(stacked_t_hat)
 
         return x_hats, stacked_t_likelihoods
@@ -281,7 +297,10 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
             # sum over all dimensions, average over batch dimension
             # and over channels so that images with different channels have the same effect
             loss = loss.sum(dim=[1, 2, 3]).mean(dim=[0]) / x.shape[1]
-
+        elif loss_type == "cross-entropy":
+            loss = F.cross_entropy(x, x_hat, reduction="mean")
+        elif loss_type == "l1":
+            raise NotImplementedError("l1 not implemented yet")
         elif loss_type == "ms-ssim":
             raise NotImplementedError("ms-ssim not implemented yet")
         else:
@@ -289,33 +308,40 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
 
         return loss
 
-    def multitask_loss(self, x, x_hats, loss_type: str, log_dir: str):
+    def multitask_loss(self, x, x_hats, log_dir: str):
 
-        if loss_type == "mse":
-            loss_function = self.reconstruction_loss
-            value_multiplier = 1
-            kwargs = {}
-        elif loss_type == "psnr":
-            loss_function = peak_signal_noise_ratio
-            value_multiplier = 255
-            kwargs = {"data_range": 255}
-        elif loss_type == "ms-ssim":
-            loss_function = ms_ssim
-            value_multiplier = 255
-            kwargs = {"data_range": 255}
-        else:
-            raise NotImplementedError("Loss should be one of {mse, psnr, ms-ssim}")
-
-        total_loss = 0
-        logs = {}
+        task_losses = dict()
+        logs = dict()
 
         for task in self.tasks:
-            loss_value = loss_function(x_hats[task] * value_multiplier, x[task] * value_multiplier, **kwargs)
-            logs[f"{log_dir}/{task}/{loss_type}"] = loss_value
 
-            total_loss += loss_value
+            loss_name = task_parameters[task]["loss_function"]
+            task_losses[task] = self.reconstruction_loss(x=x[task],
+                                                         x_hat=x_hats[task],
+                                                         loss_type=loss_name)
 
-        return total_loss / self.n_tasks, logs
+            logs[f"{log_dir}/{task}/{loss_name}"] = task_losses[task]
+
+        task_losses = self.loss_balancer(task_losses)
+
+        weighted_loss = sum(task_losses.values())
+
+        return weighted_loss, logs
+
+    def average_metrics(self, x, x_hats, log_dir: str) -> Dict[str, float]:
+
+        value_multiplier = 255
+
+        logs = {}
+        for metric_name, metric_function in self.metrics.items():
+            for task in self.tasks:
+                value = metric_function(x_hats[task] * value_multiplier,
+                                        x[task] * value_multiplier,
+                                        data_range=value_multiplier)
+
+                logs[f"{log_dir}/{task}/{metric_name}"] = value
+
+        return logs
 
     def __get_number_of_pixels(self, x_hats) -> int:
         B, _, H, W = torch.stack([torch.tensor(x_hats[task].shape) for task in self.tasks]).sum(0)
@@ -342,15 +368,15 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
 
         x_hats, likelihoods = self.forward(batch)
 
-        rec_loss, rec_logs = self.multitask_loss(x=batch, x_hats=x_hats, loss_type="mse", log_dir="train")
+        weighted_rec_loss, rec_logs = self.multitask_loss(x=batch, x_hats=x_hats, log_dir="train")
 
         compression_loss = self.compression_loss(likelihoods=likelihoods,
                                                  num_pixels=self.__get_number_of_pixels(x_hats))
 
-        loss = self.lmbda * rec_loss + compression_loss
+        loss = self.lmbda * weighted_rec_loss + compression_loss
 
         log_dict = {
-            "train/mse": rec_loss,
+            "train/mse": weighted_rec_loss,
             "train/compression_loss": compression_loss,
             "train/loss": loss}
 
@@ -368,12 +394,9 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
         self.manual_backward(loss=aux_loss)
         aux_opt.step()
 
-        for metric in self.metrics:
-            average_value, logs = self.multitask_loss(x=batch, x_hats=x_hats, loss_type=metric, log_dir="train")
-            # log averaged metric values
-            log_dict[f"train/{metric}"] = average_value
-            # add per-task metric values
-            log_dict.update(logs)
+        metric_logs = self.average_metric(x=batch, x_hats=x_hats, log_dir="train")
+
+        log_dict.update(metric_logs)
 
         self.log_dict(log_dict, on_step=True, on_epoch=False, sync_dist=True)
 
@@ -382,27 +405,24 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         x_hats, likelihoods = self.forward(batch)
 
-        rec_loss, rec_logs = self.multitask_loss(x=batch, x_hats=x_hats, loss_type="mse", log_dir="val")
+        weighted_rec_loss, rec_logs = self.multitask_loss(x=batch, x_hats=x_hats, log_dir="val")
 
         compression_loss = self.compression_loss(likelihoods=likelihoods,
                                                  num_pixels=self.__get_number_of_pixels(x_hats))
 
-        loss = self.lmbda * rec_loss + compression_loss
+        loss = self.lmbda * weighted_rec_loss + compression_loss
 
         log_dict = {
-            "val/rec_loss": rec_loss,
+            "val/rec_loss": weighted_rec_loss,
             "val/compression_loss": compression_loss,
             "val/loss": loss,
         }
 
         log_dict.update(rec_logs)
 
-        for metric in self.metrics:
-            average_value, logs = self.multitask_loss(x=batch, x_hats=x_hats, loss_type=metric, log_dir="val")
-            # log averaged metric values
-            log_dict[f"val/{metric}"] = average_value
-            # add per-task metric values
-            log_dict.update(logs)
+        metric_logs = self.average_metric(x=batch, x_hats=x_hats, log_dir="val")
+
+        log_dict.update(metric_logs)
 
         self.log_dict(log_dict, on_step=False, on_epoch=True, sync_dist=True)
         return loss
@@ -488,6 +508,9 @@ class SingleTaskCompressor(MultiTaskMixedLatentCompressor):
                          learning_rate_aux=learning_rate_aux,
                          **kwargs)
 
+        # we don't need any multi-task loss balancing when we only have a single loss
+        self.loss_balancer = lambda x: x
+
 
 class MultiTaskSeparableLatentCompressor(MultiTaskMixedLatentCompressor):
 
@@ -496,6 +519,7 @@ class MultiTaskSeparableLatentCompressor(MultiTaskMixedLatentCompressor):
             compression_model_class: type,
             tasks: Tuple[str],
             input_channels: Tuple[int],
+            output_channels: Tuple[int],
             latent_channels: int,
             conv_channels: int,
             lmbda: float = 1,
@@ -508,6 +532,7 @@ class MultiTaskSeparableLatentCompressor(MultiTaskMixedLatentCompressor):
         super().__init__(compression_model_class=compression_model_class,
                          tasks=tasks,
                          input_channels=input_channels,
+                         output_channels=output_channels,
                          conv_channels=conv_channels,
                          latent_channels=latent_channels,
                          lmbda=lmbda,
@@ -516,6 +541,9 @@ class MultiTaskSeparableLatentCompressor(MultiTaskMixedLatentCompressor):
                          learning_rate_main=learning_rate_main,
                          learning_rate_aux=learning_rate_aux,
                          **kwargs)
+
+        def _build_model(self):
+            pass
 
         def forward(self, batch) -> Tuple[Dict[str, torch.Tensor], Dict[str, torch.Tensor]]:
 

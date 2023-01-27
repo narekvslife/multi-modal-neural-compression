@@ -211,11 +211,13 @@ def main(args):
     else:
         raise NotImplementedError(f"Architecture number {args.model} is not available")
 
-    input_channels = tuple(task_configs.task_parameters[t]["out_channels"] for t in args.tasks)
+    input_channels = tuple(task_configs.task_parameters[t]["in_channels"] for t in args.tasks)
+    output_channels = tuple(task_configs.task_parameters[t]["out_channels"] for t in args.tasks)
 
     compressor = model_type(compression_model_class=ScaleHyperprior,
                             tasks=args.tasks,
                             input_channels=input_channels,
+                            output_channels=output_channels,
                             latent_channels=args.latent_channels,
                             conv_channels=args.conv_channels,
                             quality=args.quality,

@@ -1,3 +1,10 @@
+# Copyright (c) EPFL VILAB.
+# All rights reserved.
+
+# This source code is licensed under the license found in the
+# LICENSE file in the root directory of this source tree.
+import os
+
 from PIL import Image
 import numpy as np
 import torch
@@ -28,7 +35,7 @@ def get_transform(task: str, image_size=Optional[int]):
         transform = transform_16bit_single_channel
     elif task in ['principal_curvature', 'curvature']:
         transform = transform_8bit_n_channel(2)
-    elif task in ['segment_semantic']:  # stored as a 1 channel image (H,W) where each pixel value is a different class
+    elif task in ['semantic']:  # stored as a 1 channel image (H,W) where each pixel value is a different class
         transform = transform_dense_labels
     elif task in ['class_object', 'class_scene']:
         transform = torch.tensor
