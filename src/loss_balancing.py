@@ -9,7 +9,7 @@ from typing import Dict, Tuple
 import torch
 import torch.nn as nn
 
-from src.utils import DummyModule
+from utils import DummyModule
 
 
 class NoWeightingStrategy(DummyModule):

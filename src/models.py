@@ -23,7 +23,7 @@ from compressai.models.utils import conv, deconv
 from datasets.task_configs import task_parameters
 
 from loss_balancing import UncertaintyWeightingStrategy, NoWeightingStrategy
-from src.utils import DummyModule
+from utils import DummyModule
 
 
 class MultiTaskMixedLatentCompressor(pl.LightningModule):
@@ -352,34 +352,39 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
 
         return logs
 
-    def __get_number_of_pixels(self, x_hats: Dict[str, torch.Tensor]) -> int:
-        B, _, H, W = torch.stack([torch.tensor(x_hats[task].shape) for task in self.tasks]).sum(0)
-        return B * H * W
-
-    def __compression_loss(self, x_hats: Dict[str, torch.Tensor], likelihoods: Dict[str: torch.Tensor]) -> float:
+    def __get_task_likelihoods(self, likelihoods: Dict[str, torch.Tensor], task: str) -> Dict[str, torch.Tensor]:
         """
         Note that since in this model the information about all the tasks is mixed - the only way to decompress a task
-        is to use all the parts of the latent -- thus the cost of storing latents of each task is same
-        as the cost of storing latents of all tasks together.
-        To get this value on average per task - we divide by the number of tasks.
+        is to use all the parts of the latent -- thus all the likelihoods refer to each task
 
-        This function can be overridden for each inherited class, while multitask_compression_loss is expected to remain
-
-        :param x_hats: {"task1": [x_hat_1_1, ..., x_hat_1_B],
-                         ...
-                        "taskN": [x_hat_N_1, ..., x_hat_N_B]}
-
-        :param likelihoods: {"y": [likelihoods], "z": [likelihoods]}
-
+        :param likelihoods:
+        :param task:
         :return:
         """
-        total_pixels = self.__get_number_of_pixels(x_hats)
 
-        compression_loss = torch.log(likelihoods["y"]).sum()
-        compression_loss += torch.log(likelihoods["z"]).sum()
-        compression_loss /= -torch.log(torch.tensor(2)) * total_pixels
+        # todo: document why multiple keys in likelihoods
+        return likelihoods
 
-        return compression_loss / self.n_tasks
+    def __get_number_of_pixels(self, x_hats: Dict[str, torch.Tensor], task: str) -> int:
+        B, _, H, W = x_hats[task].shape
+        return B * H * W
+
+    def __compression_loss(self, likelihoods: Dict[str, torch.Tensor], num_pixels) -> float:
+        """
+        :param likelihoods: dictionary with likelihoods that need to be considered for this compression estimate
+        :param num_pixels: number of pixels that these likelihoods encode
+        """
+
+        compression_loss = 0
+
+        # todo: document why multiple keys
+        for _, _likelihoods in likelihoods.items():
+            compression_loss += torch.log(_likelihoods).sum()
+
+        compression_loss /= -torch.log(torch.tensor(2))
+        compression_loss /= num_pixels
+
+        return compression_loss
 
     def multitask_compression_loss(self,
                                    likelihoods: Dict[str, torch.Tensor],
@@ -398,8 +403,14 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
         logs = dict()
 
         for task in self.tasks:
-            task_loss = self.__compression_loss(x_hats=x_hats, likelihoods=likelihoods)
+            task_likelihoods = self.__get_task_likelihoods(likelihoods, task)
+
+            num_pixels = self.__get_number_of_pixels(x_hats, task)
+
+            task_loss = self.__compression_loss(likelihoods=task_likelihoods, num_pixels=num_pixels)
+
             total_loss += task_loss
+
             logs[f"{log_dir}/{task}/compression_loss"] = task_loss
 
         return total_loss, logs
@@ -407,7 +418,8 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         """
         Note that we do manual optimization and not an automatic one (which comes with pytorch lightning)
-        because we have two parameters to optimize
+        because we have two parameter sets to optimize with two different optimizers
+
         :param batch:
         :param batch_idx:
         :return:
@@ -625,6 +637,27 @@ class MultiTaskSeparableLatentCompressor(MultiTaskMixedLatentCompressor):
                   f"so the latent_channels is automatically reset to ({self.latent_channels_per_task * self.n_tasks})")
             self.latent_channels = self.latent_channels_per_task * self.n_tasks
 
+
+    def __get_task_channels(self, latent_tensor: torch.Tensor, task: str) -> torch.Tensor:
+        """
+        This function expect a 4d tensor of type (B, C, H, W) and returns a subset of values which refer to a particular
+        task. This can be done because each task takes exactly self.latent_channels_per_task channels in the latent and
+        we know the order of the tasks
+
+        :param tensor:
+        :param task:
+        :return:
+        """
+
+        assert len(latent_tensor.shape) == 4
+
+        task_n = self.tasks.index(task)
+
+        channel_l = task_n * self.latent_channels_per_task
+        channel_r = (task_n + 1) * self.latent_channels_per_task
+
+        return latent_tensor[:, channel_l: channel_r, :, :]
+
     def __build_compression_backbone(self, N: int, M: int) -> nn.Module:
         """
         :param N: - number of channels for each convolution layer of the compression model
@@ -674,10 +707,9 @@ class MultiTaskSeparableLatentCompressor(MultiTaskMixedLatentCompressor):
         x_hats = {}
 
         for task_n, task in enumerate(self.tasks):
-            channel_l = task_n * self.latent_channels_per_task
-            channel_r = (task_n + 1) * self.latent_channels_per_task
+            task_values = self.__get_task_channels(batch, task)
 
-            x_hats[task] = self.model["output_heads"][task_n](batch[:, channel_l: channel_r, :, :])
+            x_hats[task] = self.model["output_heads"][task_n](task_values)
 
         return x_hats
 
@@ -713,3 +745,17 @@ class MultiTaskSeparableLatentCompressor(MultiTaskMixedLatentCompressor):
         x_hats = self.forward_output_heads(latent_code)
 
         return x_hats, latent_code_likelihoods
+
+    def __get_task_likelihoods(self, likelihoods: Dict[str, torch.Tensor], task: str) -> Dict[str, torch.Tensor]:
+        """
+        In this model the information about each task is in the specific channels of the "y" latent.
+        The number of channels is equal for all tasks. Note that we still use all of the "z" latents
+
+        # todo: document why multiple keys in likelihoods
+
+        :param likelihoods:
+        :param task:
+        :return:
+        """
+
+        return {"y": self.__get_task_channels(likelihoods["y"], task), "z": likelihoods["z"]}
