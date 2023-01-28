@@ -208,6 +208,8 @@ def main(args):
         model_type = models.SingleTaskCompressor
     elif args.model == 2:
         model_type = models.MultiTaskMixedLatentCompressor
+    elif args.model == 3:
+        model_type = models.MultiTaskSeparableLatentCompressor
     else:
         raise NotImplementedError(f"Architecture number {args.model} is not available")
 

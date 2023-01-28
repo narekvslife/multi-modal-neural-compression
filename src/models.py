@@ -637,14 +637,13 @@ class MultiTaskSeparableLatentCompressor(MultiTaskMixedLatentCompressor):
                   f"so the latent_channels is automatically reset to ({self.latent_channels_per_task * self.n_tasks})")
             self.latent_channels = self.latent_channels_per_task * self.n_tasks
 
-
     def __get_task_channels(self, latent_tensor: torch.Tensor, task: str) -> torch.Tensor:
         """
         This function expect a 4d tensor of type (B, C, H, W) and returns a subset of values which refer to a particular
         task. This can be done because each task takes exactly self.latent_channels_per_task channels in the latent and
         we know the order of the tasks
 
-        :param tensor:
+        :param latent_tensor:
         :param task:
         :return:
         """
