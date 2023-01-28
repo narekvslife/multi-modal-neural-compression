@@ -270,10 +270,10 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
 
         stacked_t = self.forward_input_heads(batch)
 
-        stacked_t_preds = self.model["compressor"](stacked_t)
+        compressor_outputs = self.model["compressor"](stacked_t)
 
-        stacked_t_hat = stacked_t_preds["x_hat"]
-        stacked_t_likelihoods = stacked_t_preds["likelihoods"]  # {"y": y_likelihoods, "z": z_likelihoods}
+        stacked_t_hat = compressor_outputs["x_hat"]
+        stacked_t_likelihoods = compressor_outputs["likelihoods"]  # {"y": y_likelihoods, "z": z_likelihoods}
 
         # x_hats = {"task1": [torch_tensor_1_1_hat, ..., torch_tensor_B_1_hat], ... }
         x_hats = self.forward_output_heads(stacked_t_hat)
@@ -664,7 +664,7 @@ class MultiTaskSeparableLatentCompressor(MultiTaskMixedLatentCompressor):
         :return:
         """
 
-        model = super().__get_compression_network(N, M)
+        model = super().__build_compression_backbone(N, M)
 
         # Rasons for silencing g_s are described in the doc for this class
         model.g_s = DummyModule()
@@ -711,39 +711,6 @@ class MultiTaskSeparableLatentCompressor(MultiTaskMixedLatentCompressor):
             x_hats[task] = self.model["output_heads"][task_n](task_values)
 
         return x_hats
-
-    def forward(self, batch) -> Tuple[Dict[str, torch.Tensor], Dict[str, torch.Tensor]]:
-        """
-        :param: batch - expected to be of the following form
-                {
-                 "task1": [torch_tensor_1_1, torch_tensor_2_1, ..., torch_tensor_B_1],
-                 "task2": [torch_tensor_1_2, torch_tensor_2_2, ..., torch_tensor_B_2],
-                  ...
-                 "taskM": [torch_tensor_1_M, torch_tensor_2_M, ..., torch_tensor_B_M],
-                }
-
-        :returns:(
-                {
-                 "task1": [torch_tensor_1_1_hat, ..., torch_tensor_B_1_hat],
-                 "task2": [torch_tensor_1_2_hat, ..., torch_tensor_B_2_hat],
-                  ...
-                 "taskM": [torch_tensor_1_M_hat, ..., torch_tensor_B_M_hat],
-                },
-                {"y": y_likelihoods, "z": z_likelihoods}
-            )
-        """
-
-        stacked_t = self.forward_input_heads(batch)
-
-        latent_code = self.model["compressor"](stacked_t)
-        latent_code = latent_code["x_hat"]
-
-        latent_code_likelihoods = latent_code["likelihoods"]  # {"y": y_likelihoods, "z": z_likelihoods}
-
-        # x_hats = {"task1": [torch_tensor_1_1_hat, ..., torch_tensor_B_1_hat], ... }
-        x_hats = self.forward_output_heads(latent_code)
-
-        return x_hats, latent_code_likelihoods
 
     def __get_task_likelihoods(self, likelihoods: Dict[str, torch.Tensor], task: str) -> Dict[str, torch.Tensor]:
         """
