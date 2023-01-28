@@ -49,4 +49,4 @@ class UncertaintyWeightingStrategy(nn.Module):
         weighted_task_losses = task_losses.copy()
         weighted_task_losses.update(zip(weighted_task_losses, losses_tensor))
 
-        return total_loss
+        return weighted_task_losses
