@@ -9,17 +9,13 @@ from typing import Dict, Tuple
 import torch
 import torch.nn as nn
 
+from src.utils import DummyModule
 
-class NoWeightingStrategy(nn.Module):
+
+class NoWeightingStrategy(DummyModule):
     """
-    No weighting strategy
+        No weighting strategy
     """
-
-    def __init__(self, **kwargs):
-        super(NoWeightingStrategy, self).__init__()
-
-    def forward(self, task_losses):
-        return task_losses
 
 
 class UncertaintyWeightingStrategy(nn.Module):

@@ -1,4 +1,7 @@
+import torch.nn as nn
+
 import matplotlib.pyplot as plt
+
 from pytorch_lightning.loggers import WandbLogger
 
 WANDB_LOGGER = None
@@ -26,3 +29,11 @@ def show_images(images: list):
         axs[i].imshow(images[i])
 
     plt.show()
+
+
+class DummyModule(nn.Module):
+    def __init__(self, **kwargs):
+        super().__init__()
+
+    def forward(self, x):
+        return x

@@ -23,6 +23,7 @@ from compressai.models.utils import conv, deconv
 from datasets.task_configs import task_parameters
 
 from loss_balancing import UncertaintyWeightingStrategy, NoWeightingStrategy
+from src.utils import DummyModule
 
 
 class MultiTaskMixedLatentCompressor(pl.LightningModule):
@@ -92,7 +93,7 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
 
         self.kwargs = kwargs
 
-        self.model: nn.ModuleDict = self._build_model()
+        self.model: nn.ModuleDict = self.__build_model()
 
         self.loss_balancer = UncertaintyWeightingStrategy(self.n_tasks)
 
@@ -120,8 +121,8 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
 
         for t_i in range(self.n_tasks):
             i_c = input_channels[t_i]
-            pto_c = per_task_output_channels[t_i]
-            pti_c = per_task_output_channels[t_i] * 2 if is_deconv else per_task_output_channels[t_i] // 2
+            pto_c = per_task_output_channels[t_i]  # output channels for each task (head)
+            pti_c = pto_c * 2 if is_deconv else pto_c // 2  # intermediate channels for each task (head)
 
             if is_deconv:
                 head = nn.Sequential(deconv(i_c, pti_c),
@@ -143,10 +144,10 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
 
         return nn.ModuleList(list_of_modules)
 
-    def __get_compression_network(self, N: int, M: int) -> nn.Module:
+    def __build_compression_backbone(self, N: int, M: int) -> nn.Module:
         """
-        :param N: - number of channels for each convolution layer channels to the compression model
-        :param M: - number of latent channels that later will be compressed
+        :param N: - number of channels for each convolution layer of the compression model
+        :param M: - number of latent channels (in the latent code) that later will be compressed
         :return:
         """
         if self.pretrained:
@@ -177,7 +178,7 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
 
         return model
 
-    def _build_model(self) -> nn.ModuleDict:
+    def __build_model(self) -> nn.ModuleDict:
         """
         x1 -> task_enc1 -> t_1 ->  ↓                              -> task_dec1 -> x1_hat
 
@@ -185,7 +186,7 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
 
         x3 -> task_enc3 -> t_3 ->  ↑                              -> task_dec3 -> x3_hat
 
-        **kwargs - additional arguments for the "compressor" model
+        Compressor backbone outputs 3N channels (t_hat), each task decoder gets _all_ 3N channels
         """
 
         model = nn.ModuleDict()
@@ -200,8 +201,8 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
         total_task_channels = self.conv_channels * self.n_tasks
 
         # these task-specific channels are stacked and passed to the default CompressAI model
-        model["compressor"] = self.__get_compression_network(N=total_task_channels,
-                                                             M=self.latent_channels)
+        model["compressor"] = self.__build_compression_backbone(N=total_task_channels,
+                                                                M=self.latent_channels)
 
         # now that mixed representations should be passed to task-specific output heads
         model["output_heads"] = self.__build_heads(total_task_channels, self.output_channels, is_deconv=True)
@@ -288,7 +289,7 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
 
         :param: reconstruction_loss_type - which loss function to use*
 
-         :returns: the reconstruction loss
+        :returns: the reconstruction loss
         """
 
         if loss_type == "mse":
@@ -338,7 +339,7 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
                 # TODO: move this to some general config
                 if task == "semantic":
                     value_multiplier = 1
-                    data_range = 17  # think maybe it makes sense to make this 255 since we use the image as a png anyway..?
+                    data_range = 17
                     task_prediction = torch.argmax(task_prediction, dim=1).unsqueeze(1).float()
                     task_target = task_target
                 else:
@@ -351,16 +352,57 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
 
         return logs
 
-    def __get_number_of_pixels(self, x_hats) -> int:
+    def __get_number_of_pixels(self, x_hats: Dict[str, torch.Tensor]) -> int:
         B, _, H, W = torch.stack([torch.tensor(x_hats[task].shape) for task in self.tasks]).sum(0)
         return B * H * W
 
-    def compression_loss(self, likelihoods: Dict[str, torch.Tensor], num_pixels: int):
+    def __compression_loss(self, x_hats: Dict[str, torch.Tensor], likelihoods: Dict[str: torch.Tensor]) -> float:
+        """
+        Note that since in this model the information about all the tasks is mixed - the only way to decompress a task
+        is to use all the parts of the latent -- thus the cost of storing latents of each task is same
+        as the cost of storing latents of all tasks together.
+        To get this value on average per task - we divide by the number of tasks.
+
+        This function can be overridden for each inherited class, while multitask_compression_loss is expected to remain
+
+        :param x_hats: {"task1": [x_hat_1_1, ..., x_hat_1_B],
+                         ...
+                        "taskN": [x_hat_N_1, ..., x_hat_N_B]}
+
+        :param likelihoods: {"y": [likelihoods], "z": [likelihoods]}
+
+        :return:
+        """
+        total_pixels = self.__get_number_of_pixels(x_hats)
+
         compression_loss = torch.log(likelihoods["y"]).sum()
         compression_loss += torch.log(likelihoods["z"]).sum()
-        compression_loss /= -torch.log(torch.tensor(2)) * num_pixels
+        compression_loss /= -torch.log(torch.tensor(2)) * total_pixels
 
-        return compression_loss
+        return compression_loss / self.n_tasks
+
+    def multitask_compression_loss(self,
+                                   likelihoods: Dict[str, torch.Tensor],
+                                   x_hats: Dict[str, torch.Tensor],
+                                   log_dir: str) -> Tuple[float, Dict[str, float]]:
+        """
+
+        :param likelihoods:
+        :param x_hats:
+        :param log_dir:
+
+        :return:
+        """
+
+        total_loss = 0
+        logs = dict()
+
+        for task in self.tasks:
+            task_loss = self.__compression_loss(x_hats=x_hats, likelihoods=likelihoods)
+            total_loss += task_loss
+            logs[f"{log_dir}/{task}/compression_loss"] = task_loss
+
+        return total_loss, logs
 
     def training_step(self, batch, batch_idx):
         """
@@ -376,19 +418,21 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
 
         x_hats, likelihoods = self.forward(batch)
 
-        weighted_rec_loss, rec_logs = self.multitask_loss(x=batch, x_hats=x_hats, log_dir="train")
+        weighted_rec_loss, other_rec_logs = self.multitask_loss(x=batch, x_hats=x_hats, log_dir="train")
 
-        compression_loss = self.compression_loss(likelihoods=likelihoods,
-                                                 num_pixels=self.__get_number_of_pixels(x_hats))
+        compression_loss, other_comp_logs = self.multitask_compression_loss(likelihoods=likelihoods,
+                                                                            x_hats=x_hats,
+                                                                            log_dir="train")
 
         loss = self.lmbda * weighted_rec_loss + compression_loss
 
         log_dict = {
-            "train/mse": weighted_rec_loss,
+            "train/rec_loss": weighted_rec_loss,
             "train/compression_loss": compression_loss,
             "train/loss": loss}
 
-        log_dict.update(rec_logs)
+        log_dict.update(other_rec_logs)
+        log_dict.update(other_comp_logs)
 
         main_opt.zero_grad()
         self.manual_backward(loss)
@@ -410,13 +454,15 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
 
         return loss
 
+    # TODO: rewrite train and val, they are almost copy-pasted
     def validation_step(self, batch, batch_idx):
         x_hats, likelihoods = self.forward(batch)
 
-        weighted_rec_loss, rec_logs = self.multitask_loss(x=batch, x_hats=x_hats, log_dir="val")
+        weighted_rec_loss, other_rec_logs = self.multitask_loss(x=batch, x_hats=x_hats, log_dir="val")
 
-        compression_loss = self.compression_loss(likelihoods=likelihoods,
-                                                 num_pixels=self.__get_number_of_pixels(x_hats))
+        compression_loss, other_comp_logs = self.multitask_compression_loss(likelihoods=likelihoods,
+                                                                            x_hats=x_hats,
+                                                                            log_dir="val")
 
         loss = self.lmbda * weighted_rec_loss + compression_loss
 
@@ -426,7 +472,8 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
             "val/loss": loss,
         }
 
-        log_dict.update(rec_logs)
+        log_dict.update(other_rec_logs)
+        log_dict.update(other_comp_logs)
 
         metric_logs = self.average_metrics(x=batch, x_hats=x_hats, log_dir="val")
 
@@ -442,16 +489,10 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
         return set(p for n, p in self.model.named_parameters() if n.endswith(".quantiles"))
 
     def configure_optimizers(self):
-        main_optimizer = torch.optim.Adam(self.get_main_parameters(), lr=self.learning_rate_main)
-        # lr_schedulers = {"scheduler": ReduceLROnPlateau(main_optimizer,
-        #                                                 threshold=0.2,
-        #                                                 factor=0.5,
-        #                                                 min_lr=1e-9,
-        #                                                 mode="min"),
-        #                  "monitor": ["train_loss", "val_loss"]}
 
+        main_optimizer = torch.optim.Adam(self.get_main_parameters(), lr=self.learning_rate_main)
         auxilary_optimizer = torch.optim.Adam(self.get_auxilary_parameters(), lr=self.learning_rate_aux)
-        # return {"optimizer": main_optimizer, "scheduler": lr_schedulers}, {"optimizer": auxilary_optimizer}
+
         return {"optimizer": main_optimizer}, {"optimizer": auxilary_optimizer}
 
     def update_bottleneck_quantiles(self):
@@ -462,6 +503,7 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
 
         x = self.forward_input_heads(batch)
         ans = self.model["compressor"].compress(x)  # {"strings": [y_strings, z_strings],"shape": z.size()[-2:]}
+
         return ans
 
     def decompress(self, strings, shape):
@@ -475,7 +517,7 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
 
 class SingleTaskCompressor(MultiTaskMixedLatentCompressor):
     """
-        A single compressor network which compresses a single task.
+        A compressor network which compresses only a single task.
 
         This is basically the compression_model_class but with variable number of channels for the input.
         OR a MultiTaskMixedLatentCompressor with the list of tasks including only a single task
@@ -521,6 +563,30 @@ class SingleTaskCompressor(MultiTaskMixedLatentCompressor):
 
 
 class MultiTaskSeparableLatentCompressor(MultiTaskMixedLatentCompressor):
+    """
+        A compressor network which compresses multiple tasks with the codes being separable by task.
+        Meaning we would only need a subset of codes to decode a subset of tasks.
+
+        This is basically the MultiTaskMixedLatentCompressor but with latents being separable.
+
+        Schema:
+
+        x1 -> task_enc1 -> t_1 ->  ↓                                          t_hat_1 -> task_dec1 -> x1_hat
+        x2 -> task_enc2 -> t_2 -> [+] -> t -> compressor(w/o g_s function) -> t_hat_2 -> task_dec2 -> x2_hat
+        x3 -> task_enc3 -> t_3 ->  ↑                                          t_hat_3 -> task_dec3 -> x3_hat
+
+
+        Note that we removed g_s from the compressor backbone, by default (in CompressAI module) it is implemented s.t.
+        it would mix the M=self.latent_size channels of it's latents in the decoder(g_s), which will not allow us to
+        control which parts of the latent encodes which task's information (by controlling the update from backprop).
+
+        Now - compressor backbone outputs M=self.latent_size channels, we skip the g_s function and
+        each of out task decoder(output_heads) gets M // self.n_tasks channels.
+
+        This way we get separation of which task is encoded in which channel of the latent.
+
+        Each t_hat_i in this case is of shape M // self.n_tasks/
+    """
 
     def __init__(
             self,
@@ -550,10 +616,100 @@ class MultiTaskSeparableLatentCompressor(MultiTaskMixedLatentCompressor):
                          learning_rate_aux=learning_rate_aux,
                          **kwargs)
 
-        def _build_model(self):
-            pass
+        self.latent_channels_per_task = self.latent_channels // self.n_tasks
 
-        def forward(self, batch) -> Tuple[Dict[str, torch.Tensor], Dict[str, torch.Tensor]]:
+        if self.latent_channels % self.n_tasks != 0:
+            print("!! Note that we need the same number of latent channels for each task,"
+                  f"but the number of latent_channels ({self.latent_channels}) "
+                  f"is not a multiple of the number of tasks ({self.n_tasks}) "
+                  f"so the latent_channels is automatically reset to ({self.latent_channels_per_task * self.n_tasks})")
+            self.latent_channels = self.latent_channels_per_task * self.n_tasks
 
-            # todo: Note also different compression losses. I think they should be separated by channels
-            pass
+    def __build_compression_backbone(self, N: int, M: int) -> nn.Module:
+        """
+        :param N: - number of channels for each convolution layer of the compression model
+        :param M: - number of latent channels (in the latent code) that later will be compressed
+        :return:
+        """
+
+        model = super().__get_compression_network(N, M)
+
+        # Rasons for silencing g_s are described in the doc for this class
+        model.g_s = DummyModule()
+
+        return model
+
+    def __build_model(self) -> nn.ModuleDict:
+        model = nn.ModuleDict()
+
+        # first we build the task-specific input heads
+        model["input_heads"] = self.__build_heads(input_channels=self.input_channels,
+                                                  output_channels=self.conv_channels)
+
+        # Note that we multiply self.conv_channels by the number of tasks,
+        # because after the encoder heads we will have self.conv_channels channels from __each__ of the encoder heads
+        total_task_channels = self.conv_channels * self.n_tasks
+
+        # in M by dividing and multiplying we
+        model["compressor"] = self.__build_compression_backbone(N=total_task_channels,
+                                                                M=self.latent_channels)
+
+        # each decoder head should only have (self.latent_channels // self.n_tasks) as input
+        model["output_heads"] = self.__build_heads(self.latent_channels_per_task,
+                                                   self.output_channels,
+                                                   is_deconv=True)
+
+    def forward_output_heads(self, batch) -> Dict[str, torch.Tensor]:
+        """
+        :param: batch - expected to be of the shape (B, self.latent_channels, W, H)
+
+        :returns: Task specific predictions
+                {
+                 "task1": [torch_tensor_1_1, torch_tensor_2_1, ..., torch_tensor_B_1,
+                 "task2": [torch_tensor_1_2, torch_tensor_2_2, ..., torch_tensor_B_2,
+                  ...
+                 "taskM": [torch_tensor_1_M, torch_tensor_2_M, ..., torch_tensor_B_M,
+                }
+        """
+        x_hats = {}
+
+        for task_n, task in enumerate(self.tasks):
+            channel_l = task_n * self.latent_channels_per_task
+            channel_r = (task_n + 1) * self.latent_channels_per_task
+
+            x_hats[task] = self.model["output_heads"][task_n](batch[:, channel_l: channel_r, :, :])
+
+        return x_hats
+
+    def forward(self, batch) -> Tuple[Dict[str, torch.Tensor], Dict[str, torch.Tensor]]:
+        """
+        :param: batch - expected to be of the following form
+                {
+                 "task1": [torch_tensor_1_1, torch_tensor_2_1, ..., torch_tensor_B_1],
+                 "task2": [torch_tensor_1_2, torch_tensor_2_2, ..., torch_tensor_B_2],
+                  ...
+                 "taskM": [torch_tensor_1_M, torch_tensor_2_M, ..., torch_tensor_B_M],
+                }
+
+        :returns:(
+                {
+                 "task1": [torch_tensor_1_1_hat, ..., torch_tensor_B_1_hat],
+                 "task2": [torch_tensor_1_2_hat, ..., torch_tensor_B_2_hat],
+                  ...
+                 "taskM": [torch_tensor_1_M_hat, ..., torch_tensor_B_M_hat],
+                },
+                {"y": y_likelihoods, "z": z_likelihoods}
+            )
+        """
+
+        stacked_t = self.forward_input_heads(batch)
+
+        latent_code = self.model["compressor"](stacked_t)
+        latent_code = latent_code["x_hat"]
+
+        latent_code_likelihoods = latent_code["likelihoods"]  # {"y": y_likelihoods, "z": z_likelihoods}
+
+        # x_hats = {"task1": [torch_tensor_1_1_hat, ..., torch_tensor_B_1_hat], ... }
+        x_hats = self.forward_output_heads(latent_code)
+
+        return x_hats, latent_code_likelihoods
