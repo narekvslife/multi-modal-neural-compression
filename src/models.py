@@ -405,6 +405,8 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
         for task in self.tasks:
             task_likelihoods = self._get_task_likelihoods(likelihoods, task)
 
+            # NOTE! That here we get the number of pixels for 1 task, but the codes in mixed latent model
+            # are actually same for ALL tasks
             num_pixels = self._get_number_of_pixels(x_hats, task)
 
             task_loss = self._compression_loss(likelihoods=task_likelihoods, num_pixels=num_pixels)
@@ -674,15 +676,15 @@ class MultiTaskSeparableLatentCompressor(MultiTaskMixedLatentCompressor):
         module_list = super()._build_heads(input_channels, output_channels, is_deconv)
 
         if is_deconv:
+            if type(input_channels) == int:
+                input_channels = [input_channels for _ in self.tasks]
 
             # in the beginning of each output head we prepend additional deconv layers
             for i in range(self.n_tasks):
                 module_list[i] = nn.Sequential(
-                    [
-                        deconv(output_channels[i], output_channels[i], stride=4),
-                        deconv(output_channels[i], output_channels[i], stride=4),
-                        module_list[i]
-                    ]
+                    deconv(input_channels[i], input_channels[i], stride=4),
+                    deconv(input_channels[i], input_channels[i], stride=4),
+                    module_list[i]
                 )
 
         return module_list
