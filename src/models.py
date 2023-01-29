@@ -977,11 +977,10 @@ class MultiTaskSharedLatentCompressor(MultiTaskMixedLatentCompressor):
                  "taskM": [torch_tensor_1_M_hat, ..., torch_tensor_B_M_hat],
                 }
 
-            2. Shared likelihoods:
-                {"y": torch_tensor_1_y_likelihoods, "z": torch_tensor_1_z_likelihoods}
-
-            3. Task specific likelihoods
+            2. Likelihoods
                 {
+                 "y": torch_tensor_shared_y_likelihoods,
+                 "z": torch_tensor_shared_z_likelihoods,
                  "task1": {"y": torch_tensor_1_y_likelihoods, "z": torch_tensor_1_z_likelihoods},
                  "task2": {"y": torch_tensor_2_y_likelihoods, "z": torch_tensor_2_z_likelihoods},
                   ...
@@ -1007,6 +1006,14 @@ class MultiTaskSharedLatentCompressor(MultiTaskMixedLatentCompressor):
         likelihoods.update(task_likelihoods)
         return x_hats, likelihoods
 
+    def auxiliary_loss(self):
+        loss = self.model["compressor_shared"].entropy_bottleneck.loss()
+
+        for i in range(self.n_tasks):
+            loss += self.model["compressors_tasks"][i].entropy_bottleneck.loss()
+
+        return loss
+
     def _get_task_likelihoods(self, likelihoods: Any, task: str) -> Dict[str, torch.Tensor]:
         """
 
@@ -1014,7 +1021,6 @@ class MultiTaskSharedLatentCompressor(MultiTaskMixedLatentCompressor):
 
         # todo: document why multiple keys in likelihoods
         :param likelihoods: {
-
             "y": torch.Tensor,  # shared y likelihoods
             "z": torch.Tensor,  # shared z likelihoods
             "task_1": {"y", torch.Tensor, "z", torch.Tensor},
@@ -1027,19 +1033,26 @@ class MultiTaskSharedLatentCompressor(MultiTaskMixedLatentCompressor):
         :return:
         """
 
-        return {"y": likelihoods["y"],
-                "z": likelihoods["z"],
-                "y_task": likelihoods[task]["y"],
+        return {"y_task": likelihoods[task]["y"],
                 "z_task": likelihoods[task]["z"]}
 
-    def auxiliary_loss(self):
-        loss = self.model["compressor_shared"].entropy_bottleneck.loss()
+    def multitask_compression_loss(self,
+                                   likelihoods: Dict[str, torch.Tensor],
+                                   x_hats: Dict[str, torch.Tensor],
+                                   log_dir: str) -> Tuple[float, Dict[str, float]]:
+        # this compression loss includes only task-specific losses, but we also need to consider the shared part
+        compression_loss, logs = super().multitask_compression_loss(likelihoods, x_hats, log_dir)
 
-        for i in range(self.n_tasks):
-            loss += self.model["compressors_tasks"][i].entropy_bottleneck.loss()
+        # the shared codes are same for ALL input/output tasks
+        total_pixels = sum((self._get_number_of_pixels(x_hats, task) for task in self.tasks))
 
-        return loss
+        shared_code_compression_loss = self._compression_loss({"y": likelihoods["y"], "z": likelihoods["z"]},
+                                                              total_pixels)
 
-    # TODO: does this need to be redefined too?
+        logs[f"{log_dir}/shared/compression_loss"] = shared_code_compression_loss
+
+        return compression_loss, logs
+
+    # TODO: does this need to be redefined? Probably not, seems like we can optimize all the quantiles using one opt.
     # def configure_optimizers(self):
     #     pass
