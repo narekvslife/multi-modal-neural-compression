@@ -4,7 +4,7 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
-from typing import Tuple, Dict, Union
+from typing import Tuple, Dict, Union, List, Any
 
 import torch
 import torch.nn as nn
@@ -424,6 +424,9 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
 
         return total_loss, logs
 
+    def auxiliary_loss(self):
+        return self.model["compressor"].entropy_bottleneck.loss()
+
     def training_step(self, batch, batch_idx):
         """
         Note that we do manual optimization and not an automatic one (which comes with pytorch lightning)
@@ -459,7 +462,7 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
         self.manual_backward(loss)
         main_opt.step()
 
-        aux_loss = self.model["compressor"].entropy_bottleneck.loss()
+        aux_loss = self.auxiliary_loss()
 
         log_dict["train/aux_loss"] = aux_loss
 
@@ -506,15 +509,15 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
     def get_main_parameters(self):
         return set(p for n, p in self.model.named_parameters() if not n.endswith(".quantiles"))
 
-    def get_auxilary_parameters(self):
+    def get_auxiliary_parameters(self):
         return set(p for n, p in self.model.named_parameters() if n.endswith(".quantiles"))
 
     def configure_optimizers(self):
 
         main_optimizer = torch.optim.Adam(self.get_main_parameters(), lr=self.learning_rate_main)
-        auxilary_optimizer = torch.optim.Adam(self.get_auxilary_parameters(), lr=self.learning_rate_aux)
+        auxiliary_optimizer = torch.optim.Adam(self.get_auxiliary_parameters(), lr=self.learning_rate_aux)
 
-        return {"optimizer": main_optimizer}, {"optimizer": auxilary_optimizer}
+        return {"optimizer": main_optimizer}, {"optimizer": auxiliary_optimizer}
 
     def update_bottleneck_quantiles(self):
         self.model["compressor"].entropy_bottleneck.update()
@@ -774,6 +777,7 @@ class MultiTaskSeparableLatentCompressor(MultiTaskMixedLatentCompressor):
         B, _, H, W = x_hats[task].shape
         return B * H * W
 
+    # TODO: Maybe this functio should be in the base class
     def _get_task_likelihoods(self, likelihoods: Dict[str, torch.Tensor], task: str) -> Dict[str, torch.Tensor]:
         """
         In this model the information about each task is in the specific channels of the "y" latent.
@@ -817,7 +821,6 @@ class MultiTaskSharedLatentCompressor(MultiTaskMixedLatentCompressor):
             quality: int = 4,
             learning_rate_main=1e-5,
             learning_rate_aux=1e-3,
-            gamma: float = 1,
             **kwargs
     ):
         """
@@ -836,7 +839,6 @@ class MultiTaskSharedLatentCompressor(MultiTaskMixedLatentCompressor):
         :param gamma: multiplier in loss for the "shared" part
         :param kwargs:
         """
-        self.gamma = gamma
         super().__init__(compression_model_class=compression_model_class,
                          tasks=tasks,
                          input_channels=input_channels,
@@ -860,3 +862,184 @@ class MultiTaskSharedLatentCompressor(MultiTaskMixedLatentCompressor):
         """
         B, _, H, W = x_hats[task].shape
         return B * H * W
+
+    def __build_task_compressors(self, N: int, M: int):
+        compressors = nn.ModuleList()
+
+        for _ in self.tasks:
+            compressors.append(self._build_compression_backbone(N=N, M=M))
+
+        return compressors
+
+    def _build_model(self) -> nn.ModuleDict:
+        """
+        Here our "compressor backbone" consists not of a single compressor, but rather it has 1 compressor for the
+        shared latent and a separate compressor for each task
+
+        :return:
+        """
+        model = nn.ModuleDict()
+
+        # first we build the task-specific input heads
+        model["input_heads"] = self._build_heads(input_channels=self.input_channels,
+                                                 output_channels=self.conv_channels)
+
+        # Note that we multiply self.conv_channels by the number of tasks,
+        # because after the encoder heads we will have self.conv_channels channels from __each__ of the encoder heads
+        total_task_channels = self.conv_channels * self.n_tasks
+
+        model["compressor_shared"] = self._build_compression_backbone(N=total_task_channels,
+                                                                      M=self.latent_channels)
+
+        model["compressors_tasks"] = self.__build_task_compressors(N=total_task_channels,
+                                                                   M=self.latent_channels)
+
+        # Each decoder head gets as the sum of task specific and shared latent, which still has #total_task_channels
+        model["output_heads"] = self._build_heads(total_task_channels,
+                                                  self.output_channels,
+                                                  is_deconv=True)
+
+        return model
+
+    # TODO: rewrite this, forward_output_heads and forward_input_heads as a single general function (?)
+    def __forward_task_compressors(self, shared_latents: torch.Tensor) \
+            -> Tuple[List[torch.Tensor], Dict[str, Dict[str, torch.Tensor]]]:
+        """
+        :param: batch - expected to be of the shape (B, self.conv_channels * self.n_tasks, _, _)
+
+        :returns:
+            Task specific latents
+                (
+                 [torch_tensor_1_1, torch_tensor_2_1, ..., torch_tensor_B_1],
+                 [torch_tensor_1_2, torch_tensor_2_2, ..., torch_tensor_B_2],
+                  ...
+                 [torch_tensor_1_M, torch_tensor_2_M, ..., torch_tensor_B_M],
+                )
+                where M is the number of tasks, B is the batch size
+
+            and
+
+            Task specific likelihoods
+                {
+                 "task1": {"y": torch_tensor_1_y_likelihoods, "z": torch_tensor_1_z_likelihoods}
+                 "task2": {"y": torch_tensor_2_y_likelihoods, "z": torch_tensor_2_z_likelihoods}
+                  ...
+                 "taskM": {"y": torch_tensor_M_y_likelihoods, "z": torch_tensor_M_z_likelihoods}
+                }
+        """
+        task_latents = list()
+        task_likelihoods = dict()
+
+        for task_n, task in enumerate(self.tasks):
+            task_preds = self.model["compressors_tasks"][task_n](shared_latents)
+            task_latents.append(task_preds["x_hat"])
+            task_likelihoods[task] = task_preds["likelihoods"]
+
+        return task_latents, task_likelihoods
+
+    def forward_output_heads(self, batch) -> Dict[str, torch.Tensor]:
+        """
+        :param: batch - expected to be of the shape (B, #shared_channels + #task_channels , _, _)
+
+        where #shared_channels = #task_channels = self.conv_channels
+
+        :returns: Task specific predictions
+                {
+                 "task1": [torch_tensor_1_1, torch_tensor_2_1, ..., torch_tensor_B_1,
+                 "task2": [torch_tensor_1_2, torch_tensor_2_2, ..., torch_tensor_B_2,
+                  ...
+                 "taskM": [torch_tensor_1_M, torch_tensor_2_M, ..., torch_tensor_B_M,
+                }
+        """
+        x_hats = {}
+
+        for task_n, task in enumerate(self.tasks):
+            x_hats[task] = self.model["output_heads"][task_n](batch[task_n])
+
+        return x_hats
+
+    def forward(self, batch) -> Tuple[Dict[str, torch.Tensor], Dict[str, torch.Tensor], Dict[str, torch.Tensor]]:
+        """
+        :param: batch - expected to be of the following form
+                {
+                 "task1": [torch_tensor_1_1, torch_tensor_2_1, ..., torch_tensor_B_1],
+                 "task2": [torch_tensor_1_2, torch_tensor_2_2, ..., torch_tensor_B_2],
+                  ...
+                 "taskM": [torch_tensor_1_M, torch_tensor_2_M, ..., torch_tensor_B_M],
+                }
+
+        :returns:
+            1. Task specific predictions:
+                {
+                 "task1": [torch_tensor_1_1_hat, ..., torch_tensor_B_1_hat],
+                 "task2": [torch_tensor_1_2_hat, ..., torch_tensor_B_2_hat],
+                  ...
+                 "taskM": [torch_tensor_1_M_hat, ..., torch_tensor_B_M_hat],
+                }
+
+            2. Shared likelihoods:
+                {"y": torch_tensor_1_y_likelihoods, "z": torch_tensor_1_z_likelihoods}
+
+            3. Task specific likelihoods
+                {
+                 "task1": {"y": torch_tensor_1_y_likelihoods, "z": torch_tensor_1_z_likelihoods},
+                 "task2": {"y": torch_tensor_2_y_likelihoods, "z": torch_tensor_2_z_likelihoods},
+                  ...
+                 "taskM": {"y": torch_tensor_M_y_likelihoods, "z": torch_tensor_M_z_likelihoods}
+                }
+        """
+
+        stacked_t = self.forward_input_heads(batch)
+
+        shared_compressor_outputs = self.model["compressor_shared"](stacked_t)
+
+        shared_latents = shared_compressor_outputs["x_hat"]
+        likelihoods = shared_compressor_outputs["likelihoods"]  # {"y": y_likelihoods, "z": z_likelihoods}
+
+        task_latents, task_likelihoods = self.__forward_task_compressors(shared_latents)
+
+        # add task_latents to shared_latents and pass the sum through task-specific decoder (output) head
+        for i in range(self.n_tasks):
+            task_latents[i] += shared_latents
+
+        x_hats = self.forward_output_heads(task_latents)
+
+        likelihoods.update(task_likelihoods)
+        return x_hats, likelihoods
+
+    def _get_task_likelihoods(self, likelihoods: Any, task: str) -> Dict[str, torch.Tensor]:
+        """
+
+        The cost fo storing latents of task i is the cost of storing: shared_y, shared_z, task_i_y, task_i_z
+
+        # todo: document why multiple keys in likelihoods
+        :param likelihoods: {
+
+            "y": torch.Tensor,  # shared y likelihoods
+            "z": torch.Tensor,  # shared z likelihoods
+            "task_1": {"y", torch.Tensor, "z", torch.Tensor},
+            "task_2": {"y", torch.Tensor, "z", torch.Tensor},
+             ...
+            "task_M": {"y", torch.Tensor, "z", torch.Tensor}
+        }
+
+        :param task:
+        :return:
+        """
+
+        return {"y": likelihoods["y"],
+                "z": likelihoods["z"],
+                "y_task": likelihoods[task]["y"],
+                "z_task": likelihoods[task]["z"]}
+
+    def auxiliary_loss(self):
+        loss = self.model["compressor_shared"].entropy_bottleneck.loss()
+
+        for i in range(self.n_tasks):
+            loss += self.model["compressors_tasks"][i].entropy_bottleneck.loss()
+
+        return loss
+
+    # TODO: does this need to be redefined too?
+    # def configure_optimizers(self):
+    #     pass

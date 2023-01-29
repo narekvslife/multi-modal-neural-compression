@@ -204,12 +204,15 @@ def main(args):
                                                  is_train=False,
                                                  collate=default_collate)
 
+    # TODO: move this to config as dictionary
     if args.model == 1:
         model_type = models.SingleTaskCompressor
     elif args.model == 2:
         model_type = models.MultiTaskMixedLatentCompressor
     elif args.model == 3:
         model_type = models.MultiTaskSeparableLatentCompressor
+    elif args.model == 4:
+        model_type = models.MultiTaskSharedLatentCompressor
     else:
         raise NotImplementedError(f"Architecture number {args.model} is not available")
 
