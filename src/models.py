@@ -682,8 +682,18 @@ class MultiTaskSeparableLatentCompressor(MultiTaskMixedLatentCompressor):
             # in the beginning of each output head we prepend additional deconv layers
             for i in range(self.n_tasks):
                 module_list[i] = nn.Sequential(
-                    deconv(input_channels[i], input_channels[i], stride=4),
-                    deconv(input_channels[i], input_channels[i], stride=4),
+
+                    deconv(input_channels[i], input_channels[i] // 2, stride=4),
+                    GDN(input_channels[i] // 2, inverse=True),
+                    deconv(input_channels[i] // 2, input_channels[i] // 4, stride=4),
+                    GDN(input_channels[i] // 4, inverse=True),
+
+                    # some conv layers to reduce the checkerboard artifact of deconvolutions
+                    conv(input_channels[i] // 4, input_channels[i] // 2, kernel_size=3, stride=1),
+                    GDN(input_channels[i] // 2),
+                    conv(input_channels[i] // 2, input_channels[i], kernel_size=3, stride=1),
+                    GDN(input_channels[i]),
+
                     module_list[i]
                 )
 
