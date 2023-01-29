@@ -366,7 +366,14 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
         return likelihoods
 
     def _get_number_of_pixels(self, x_hats: Dict[str, torch.Tensor], task: str) -> int:
-        B, _, H, W = x_hats[task].shape
+        """
+        Number of pixels that the code of each task stores
+
+        :param x_hats:
+        :param task:
+        :return:
+        """
+        B, _, H, W = torch.stack([torch.tensor(x_hats[task].shape) for task in self.tasks]).sum(0)
         return B * H * W
 
     def _compression_loss(self, likelihoods: Dict[str, torch.Tensor], num_pixels) -> float:
@@ -756,6 +763,17 @@ class MultiTaskSeparableLatentCompressor(MultiTaskMixedLatentCompressor):
 
         return x_hats
 
+    def _get_number_of_pixels(self, x_hats: Dict[str, torch.Tensor], task: str) -> int:
+        """
+        Number of pixels that the code of each task stores
+
+        :param x_hats:
+        :param task:
+        :return:
+        """
+        B, _, H, W = x_hats[task].shape
+        return B * H * W
+
     def _get_task_likelihoods(self, likelihoods: Dict[str, torch.Tensor], task: str) -> Dict[str, torch.Tensor]:
         """
         In this model the information about each task is in the specific channels of the "y" latent.
@@ -769,3 +787,76 @@ class MultiTaskSeparableLatentCompressor(MultiTaskMixedLatentCompressor):
         """
 
         return {"y": self._get_task_channels(likelihoods["y"], task), "z": likelihoods["z"]}
+
+
+class MultiTaskSharedLatentCompressor(MultiTaskMixedLatentCompressor):
+    """
+        A compressor network which compresses multiple tasks s.t. the code of each task consists of a single "shared"
+        code, which will be the same for all tasks and one task-specific code for each task.
+
+        l_s acts here as a shared latent representation (code) which is concatenated to every task-specific code l_i.
+        Thus, to recover a task_i one would need to store the shared representation l_s and the task-specific l_i.
+
+        Schema:
+
+        x1 -> enc1 -> t_1 ->  ↓                            -> task_enc1 -> l_1 [+] l_s -> task_dec1 -> x1_hat
+        x2 -> enc2 -> t_2 -> [+] -> t -> compressor -> l_s -> task_enc2 -> l_2 [+] l_s -> task_dec2 -> x2_hat
+        x3 -> enc3 -> t_3 ->  ↑                            -> task_enc3 -> l_3 [+] l_s -> task_dec3 -> x3_hat
+    """
+
+    def __init__(
+            self,
+            compression_model_class: type,
+            tasks: Tuple[str],
+            input_channels: Tuple[int],
+            output_channels: Tuple[int],
+            latent_channels: int,
+            conv_channels: int,
+            lmbda: float = 1,
+            pretrained: bool = False,
+            quality: int = 4,
+            learning_rate_main=1e-5,
+            learning_rate_aux=1e-3,
+            gamma: float = 1,
+            **kwargs
+    ):
+        """
+
+        :param compression_model_class:
+        :param tasks:
+        :param input_channels:
+        :param output_channels:
+        :param latent_channels:
+        :param conv_channels:
+        :param lmbda:
+        :param pretrained:
+        :param quality:
+        :param learning_rate_main:
+        :param learning_rate_aux:
+        :param gamma: multiplier in loss for the "shared" part
+        :param kwargs:
+        """
+        self.gamma = gamma
+        super().__init__(compression_model_class=compression_model_class,
+                         tasks=tasks,
+                         input_channels=input_channels,
+                         output_channels=output_channels,
+                         conv_channels=conv_channels,
+                         latent_channels=latent_channels,
+                         lmbda=lmbda,
+                         pretrained=pretrained,
+                         quality=quality,
+                         learning_rate_main=learning_rate_main,
+                         learning_rate_aux=learning_rate_aux,
+                         **kwargs)
+
+    def _get_number_of_pixels(self, x_hats: Dict[str, torch.Tensor], task: str) -> int:
+        """
+        Number of pixels that the code of each task stores
+
+        :param x_hats:
+        :param task:
+        :return:
+        """
+        B, _, H, W = x_hats[task].shape
+        return B * H * W
