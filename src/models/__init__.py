@@ -1,0 +1,4 @@
+from .mixed_latent import MultiTaskMixedLatentCompressor
+from .single_task_compressor import SingleTaskCompressor
+from .disjoint_latent import MultiTaskDisjointLatentCompressor
+from .shared_latent import MultiTaskSharedLatentCompressor

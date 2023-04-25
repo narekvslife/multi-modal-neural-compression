@@ -63,7 +63,7 @@ class LogPredictionSamplesCallback(Callback):
             self.log_predicted_images(batch, trainer, pl_module,
                                       directory="train")
 
-            batch = next(iter(trainer.val_dataloaders[0]))
+            batch = next(iter(trainer.val_dataloaders))
             self.log_predicted_images(batch, trainer, pl_module,
                                       directory="val")
             pl_module.train()

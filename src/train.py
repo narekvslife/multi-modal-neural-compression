@@ -172,7 +172,8 @@ def get_dataloader(dataset_name: str, batch_size: int, num_workers: int, collate
                                         split="train" if is_train else "val")
     else:
         raise NotImplementedError(f"Dataset {dataset_name} is not supported")
-
+    
+    dataset = Subset(dataset, range(batch_size))
     dataloader = DataLoader(dataset=dataset,
                             batch_size=batch_size,
                             num_workers=num_workers,
@@ -188,21 +189,21 @@ def main(args):
                                project=WANDB_PROJECT_NAME,
                                log_model="all",
                                id=args.wandb_run_name,  # for this to work WANDB_RUN_ID should be set in environ
-                               resume="allow",)
+                               resume="allow")
 
     default_collate = make_collate_fn(args.tasks)
 
-    dataset_train, dataloader_train = get_dataloader(dataset_name=args.dataset,
-                                                     batch_size=args.batch_size,
-                                                     num_workers=args.num_workers,
-                                                     is_train=True,
-                                                     collate=default_collate)
+    _, dataloader_train = get_dataloader(dataset_name=args.dataset,
+                                         batch_size=args.batch_size,
+                                         num_workers=args.num_workers,
+                                         is_train=True,
+                                         collate=default_collate)
 
-    dataset_val, dataloader_val = get_dataloader(dataset_name=args.dataset,
-                                                 batch_size=args.batch_size,
-                                                 num_workers=args.num_workers,
-                                                 is_train=False,
-                                                 collate=default_collate)
+    _, dataloader_val = get_dataloader(dataset_name=args.dataset,
+                                       batch_size=args.batch_size,
+                                       num_workers=args.num_workers,
+                                       is_train=False,
+                                       collate=default_collate)
 
     # TODO: move this to config as dictionary
     if args.model == 1:
@@ -210,16 +211,18 @@ def main(args):
     elif args.model == 2:
         model_type = models.MultiTaskMixedLatentCompressor
     elif args.model == 3:
-        model_type = models.MultiTaskSeparableLatentCompressor
+        model_type = models.MultiTaskDisjointLatentCompressor
     elif args.model == 4:
         model_type = models.MultiTaskSharedLatentCompressor
     else:
         raise NotImplementedError(f"Architecture number {args.model} is not available")
 
+
+
     input_channels = tuple(task_configs.task_parameters[t]["in_channels"] for t in args.tasks)
     output_channels = tuple(task_configs.task_parameters[t]["out_channels"] for t in args.tasks)
 
-    compressor = model_type(compression_model_class=ScaleHyperprior,
+    compressor = model_type(compressor_backbone_class=ScaleHyperprior,
                             tasks=args.tasks,
                             input_channels=input_channels,
                             output_channels=output_channels,
@@ -229,6 +232,8 @@ def main(args):
                             lmbda=args.lmbda,
                             learning_rate_main=args.learning_rate_main,
                             learning_rate_aux=args.learning_rate_aux)
+
+    wandb_logger.experiment.config.update({"architecture_type": compressor.get_model_name()}, allow_val_change=True)
 
     trainer = pl.Trainer(
         accelerator=args.accelerator,
@@ -250,4 +255,3 @@ def main(args):
 if __name__ == "__main__":
     args = parse_args(sys.argv[1:])
     main(args)
-

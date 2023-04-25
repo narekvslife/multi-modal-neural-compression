@@ -28,11 +28,9 @@ task_parameters = {
         'mask_val': 0.502,
         'loss_function': 'mse'
     },
+    'mono': {
+        'in_channels': 1,
+        'out_channels': 1,
+        'loss_function': 'mse'
+    },
 }
-
-PIX_TO_PIX_TASKS = ['colorization', 'edge_texture', 'edge_occlusion', 'keypoints3d', 'keypoints2d', 'reshading',
-                    'depth_zbuffer', 'depth_euclidean', 'curvature', 'autoencoding', 'denoising', 'normal',
-                    'inpainting', 'segment_unsup2d', 'segment_unsup25d', 'semantic', ]
-FEED_FORWARD_TASKS = ['class_object', 'class_scene', 'room_layout', 'vanishing_point']
-SINGLE_IMAGE_TASKS = PIX_TO_PIX_TASKS + FEED_FORWARD_TASKS
-SIAMESE_TASKS = ['fix_pose', 'jigsaw', 'ego_motion', 'point_match', 'non_fixated_pose']
