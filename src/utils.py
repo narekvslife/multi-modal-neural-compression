@@ -10,9 +10,7 @@ WANDB_LOGGER = None
 def set_wandb_logger(run_name: str, project_name):
     global WANDB_LOGGER  # im so sorry. genuinely.
 
-    WANDB_LOGGER = WandbLogger(name=run_name,
-                               project=project_name,
-                               log_model="all")
+    WANDB_LOGGER = WandbLogger(name=run_name, project=project_name, log_model="all")
 
 
 def get_wandb_logger():

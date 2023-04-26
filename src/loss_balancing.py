@@ -14,13 +14,13 @@ from utils import DummyModule
 
 class NoWeightingStrategy(DummyModule):
     """
-        No weighting strategy
+    No weighting strategy
     """
 
 
 class UncertaintyWeightingStrategy(nn.Module):
     """
-        Uncertainty weighting strategy for a multitask loss
+    Uncertainty weighting strategy for a multitask loss
     """
 
     def __init__(self, num_tasks: int):
@@ -28,14 +28,16 @@ class UncertaintyWeightingStrategy(nn.Module):
 
         self.log_vars = nn.Parameter(torch.zeros(num_tasks))
 
-    def forward(self, task_losses: Dict[str, torch.Tensor]) -> Tuple[float, Dict[str, torch.Tensor]]:
+    def forward(
+        self, task_losses: Dict[str, torch.Tensor]
+    ) -> Tuple[float, Dict[str, torch.Tensor]]:
         """
 
         :param task_losses:
         :return:
         """
         losses_tensor = torch.stack(list(task_losses.values()))
-        non_zero_losses_mask = (losses_tensor != 0.0)
+        non_zero_losses_mask = losses_tensor != 0.0
 
         # calculate weighted losses
         losses_tensor = torch.exp(-self.log_vars) * losses_tensor + self.log_vars

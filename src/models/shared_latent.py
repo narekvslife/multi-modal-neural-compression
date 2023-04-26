@@ -8,33 +8,33 @@ from models import MultiTaskMixedLatentCompressor
 
 class MultiTaskSharedLatentCompressor(MultiTaskMixedLatentCompressor):
     """
-        A compressor network which compresses multiple tasks s.t. the code of each task consists of a single "shared"
-        code, which will be the same for all tasks and one task-specific code for each task.
+    A compressor network which compresses multiple tasks s.t. the code of each task consists of a single "shared"
+    code, which will be the same for all tasks and one task-specific code for each task.
 
-        l_s acts here as a shared latent representation (code) which is concatenated to every task-specific code l_i.
-        Thus, to recover a task_i one would need to store the shared representation l_s and the task-specific l_i.
+    l_s acts here as a shared latent representation (code) which is concatenated to every task-specific code l_i.
+    Thus, to recover a task_i one would need to store the shared representation l_s and the task-specific l_i.
 
-        Schema:
+    Schema:
 
-        x1 -> enc1 -> t_1 ->  ↓                            -> task_enc1 -> l_1 [+] l_s -> task_dec1 -> x1_hat
-        x2 -> enc2 -> t_2 -> [+] -> t -> compressor -> l_s -> task_enc2 -> l_2 [+] l_s -> task_dec2 -> x2_hat
-        x3 -> enc3 -> t_3 ->  ↑                            -> task_enc3 -> l_3 [+] l_s -> task_dec3 -> x3_hat
+    x1 -> enc1 -> t_1 ->  ↓                            -> task_enc1 -> l_1 [+] l_s -> task_dec1 -> x1_hat
+    x2 -> enc2 -> t_2 -> [+] -> t -> compressor -> l_s -> task_enc2 -> l_2 [+] l_s -> task_dec2 -> x2_hat
+    x3 -> enc3 -> t_3 ->  ↑                            -> task_enc3 -> l_3 [+] l_s -> task_dec3 -> x3_hat
     """
 
     def __init__(
-            self,
-            compressor_backbone_class: type,
-            tasks: Tuple[str],
-            input_channels: Tuple[int],
-            output_channels: Tuple[int],
-            latent_channels: int,
-            conv_channels: int,
-            lmbda: float = 1,
-            pretrained: bool = False,
-            quality: int = 4,
-            learning_rate_main=1e-5,
-            learning_rate_aux=1e-3,
-            **kwargs
+        self,
+        compressor_backbone_class: type,
+        tasks: Tuple[str],
+        input_channels: Tuple[int],
+        output_channels: Tuple[int],
+        latent_channels: int,
+        conv_channels: int,
+        lmbda: float = 1,
+        pretrained: bool = False,
+        quality: int = 4,
+        learning_rate_main=1e-5,
+        learning_rate_aux=1e-3,
+        **kwargs,
     ):
         """
 
@@ -52,18 +52,20 @@ class MultiTaskSharedLatentCompressor(MultiTaskMixedLatentCompressor):
         :param gamma: multiplier in loss for the "shared" part
         :param kwargs:
         """
-        super().__init__(compressor_backbone_class=compressor_backbone_class,
-                         tasks=tasks,
-                         input_channels=input_channels,
-                         output_channels=output_channels,
-                         conv_channels=conv_channels,
-                         latent_channels=latent_channels,
-                         lmbda=lmbda,
-                         pretrained=pretrained,
-                         quality=quality,
-                         learning_rate_main=learning_rate_main,
-                         learning_rate_aux=learning_rate_aux,
-                         **kwargs)
+        super().__init__(
+            compressor_backbone_class=compressor_backbone_class,
+            tasks=tasks,
+            input_channels=input_channels,
+            output_channels=output_channels,
+            conv_channels=conv_channels,
+            latent_channels=latent_channels,
+            lmbda=lmbda,
+            pretrained=pretrained,
+            quality=quality,
+            learning_rate_main=learning_rate_main,
+            learning_rate_aux=learning_rate_aux,
+            **kwargs,
+        )
 
     def _get_number_of_pixels(self, x_hats: Dict[str, torch.Tensor], task: str) -> int:
         """
@@ -94,29 +96,33 @@ class MultiTaskSharedLatentCompressor(MultiTaskMixedLatentCompressor):
         model = nn.ModuleDict()
 
         # first we build the task-specific input heads
-        model["input_heads"] = self._build_heads(input_channels=self.input_channels,
-                                                 output_channels=self.conv_channels)
+        model["input_heads"] = self._build_heads(
+            input_channels=self.input_channels, output_channels=self.conv_channels
+        )
 
         # Note that we multiply self.conv_channels by the number of tasks,
         # because after the encoder heads we will have self.conv_channels channels from __each__ of the encoder heads
         total_task_channels = self.conv_channels * self.n_tasks
 
-        model["compressor_shared"] = self._build_compression_backbone(N=total_task_channels,
-                                                                      M=self.latent_channels)
+        model["compressor_shared"] = self._build_compression_backbone(
+            N=total_task_channels, M=self.latent_channels
+        )
 
-        model["compressors_tasks"] = self.__build_task_compressors(N=total_task_channels,
-                                                                   M=self.latent_channels)
+        model["compressors_tasks"] = self.__build_task_compressors(
+            N=total_task_channels, M=self.latent_channels
+        )
 
         # Each decoder head gets as the sum of task specific and shared latent, which still has #total_task_channels
-        model["output_heads"] = self._build_heads(total_task_channels,
-                                                  self.output_channels,
-                                                  is_deconv=True)
+        model["output_heads"] = self._build_heads(
+            total_task_channels, self.output_channels, is_deconv=True
+        )
 
         return model
 
     # TODO: rewrite this, forward_output_heads and forward_input_heads as a single general function (?)
-    def __forward_task_compressors(self, shared_latents: torch.Tensor) \
-            -> Tuple[List[torch.Tensor], Dict[str, Dict[str, torch.Tensor]]]:
+    def __forward_task_compressors(
+        self, shared_latents: torch.Tensor
+    ) -> Tuple[List[torch.Tensor], Dict[str, Dict[str, torch.Tensor]]]:
         """
         :param: batch - expected to be of the shape (B, self.conv_channels * self.n_tasks, _, _)
 
@@ -171,7 +177,11 @@ class MultiTaskSharedLatentCompressor(MultiTaskMixedLatentCompressor):
 
         return x_hats
 
-    def forward(self, batch) -> Tuple[Dict[str, torch.Tensor], Dict[str, torch.Tensor], Dict[str, torch.Tensor]]:
+    def forward(
+        self, batch
+    ) -> Tuple[
+        Dict[str, torch.Tensor], Dict[str, torch.Tensor], Dict[str, torch.Tensor]
+    ]:
         """
         :param: batch - expected to be of the following form
                 {
@@ -206,7 +216,9 @@ class MultiTaskSharedLatentCompressor(MultiTaskMixedLatentCompressor):
         shared_compressor_outputs = self.model["compressor_shared"](stacked_t)
 
         shared_latents = shared_compressor_outputs["x_hat"]
-        likelihoods = shared_compressor_outputs["likelihoods"]  # {"y": y_likelihoods, "z": z_likelihoods}
+        likelihoods = shared_compressor_outputs[
+            "likelihoods"
+        ]  # {"y": y_likelihoods, "z": z_likelihoods}
 
         task_latents, task_likelihoods = self.__forward_task_compressors(shared_latents)
 
@@ -227,7 +239,9 @@ class MultiTaskSharedLatentCompressor(MultiTaskMixedLatentCompressor):
 
         return loss
 
-    def _get_task_likelihoods(self, likelihoods: Any, task: str) -> Dict[str, torch.Tensor]:
+    def _get_task_likelihoods(
+        self, likelihoods: Any, task: str
+    ) -> Dict[str, torch.Tensor]:
         """
 
         The cost fo storing latents of task i is the cost of storing: shared_y, shared_z, task_i_y, task_i_z
@@ -246,21 +260,27 @@ class MultiTaskSharedLatentCompressor(MultiTaskMixedLatentCompressor):
         :return:
         """
 
-        return {"y_task": likelihoods[task]["y"],
-                "z_task": likelihoods[task]["z"]}
+        return {"y_task": likelihoods[task]["y"], "z_task": likelihoods[task]["z"]}
 
-    def multitask_compression_loss(self,
-                                   likelihoods: Dict[str, torch.Tensor],
-                                   x_hats: Dict[str, torch.Tensor],
-                                   log_dir: str) -> Tuple[float, Dict[str, float]]:
+    def multitask_compression_loss(
+        self,
+        likelihoods: Dict[str, torch.Tensor],
+        x_hats: Dict[str, torch.Tensor],
+        log_dir: str,
+    ) -> Tuple[float, Dict[str, float]]:
         # this compression loss includes only task-specific losses, but we also need to consider the shared part
-        compression_loss, logs = super().multitask_compression_loss(likelihoods, x_hats, log_dir)
+        compression_loss, logs = super().multitask_compression_loss(
+            likelihoods, x_hats, log_dir
+        )
 
         # the shared codes are same for ALL input/output tasks
-        total_pixels = sum((self._get_number_of_pixels(x_hats, task) for task in self.tasks))
+        total_pixels = sum(
+            (self._get_number_of_pixels(x_hats, task) for task in self.tasks)
+        )
 
-        shared_code_compression_loss = self._compression_loss({"y": likelihoods["y"], "z": likelihoods["z"]},
-                                                              total_pixels)
+        shared_code_compression_loss = self._compression_loss(
+            {"y": likelihoods["y"], "z": likelihoods["z"]}, total_pixels
+        )
 
         logs[f"{log_dir}/shared/compression_loss"] = shared_code_compression_loss
 
