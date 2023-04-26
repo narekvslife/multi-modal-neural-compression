@@ -13,7 +13,7 @@ class LogPredictionSamplesCallback(Callback):
 
         self.wandb_logger = wandb_logger
 
-    def log_predicted_images(self, batch, trainer: "pl.Trainer", pl_module: "pl.LightningModule", directory: str) -> None:
+    def log_predicted_images(self, batch, trainer: pl.Trainer, pl_module: pl.LightningModule, directory: str) -> None:
 
         # unfortunately this has to be here :(
         for task in pl_module.tasks:
@@ -28,42 +28,39 @@ class LogPredictionSamplesCallback(Callback):
             target_key = f'{directory}/{task}/target'
 
             kwargs = {}
-            if task == "semantic":
-                pred_images = target_images = [torch.zeros(xh[0].shape) for xh in x_hats_task]  # log black images
-                kwargs["masks"] = [{"predictions": {"mask_data": torch.argmax(xh, dim=0).cpu().numpy()}} for xh in x_hats_task]
-            else:
-                pred_images = [xh for xh in x_hats_task]
-                target_images = [x for x in batch[task]]
+            
+            pred_images = [xh for xh in x_hats_task]
+            target_images = [x for x in batch[task]]
 
             self.wandb_logger.log_image(key=pred_key,
                                         images=pred_images,
                                         **kwargs)
 
-            # log target only once
-            if trainer.global_step < 100:
+            # log target images only once TODO: move target image logging to a separate function
+            if trainer.current_epoch == trainer.check_val_every_n_epoch - 1:
                 kwargs = {}
-                if task == "semantic":
-                    kwargs["masks"] = [{"ground_truth": {"mask_data": x.cpu().numpy()}} for x in batch[task].squeeze(1)]
 
                 self.wandb_logger.log_image(
                     key=target_key,
                     images=target_images,
                     **kwargs)
 
-    def on_train_batch_start(
-        self, trainer: "pl.Trainer", pl_module: "pl.LightningModule", batch: Any, batch_idx: int
-    ) -> None:
+    # local-testing 1.0
+    # def on_validation_epoch_end(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule") -> None:
+    #     batch = next(iter(trainer.val_dataloaders))
+    #     self.log_predicted_images(batch, trainer, pl_module,
+    #                             directory="val")
 
-        if trainer.global_step % 15000 != 0:
-            return None
 
-        with torch.no_grad():
-            pl_module.eval()
-            batch = next(iter(trainer.train_dataloader))
-            self.log_predicted_images(batch, trainer, pl_module,
-                                      directory="train")
+    # local-testing 1.1
+    def on_validation_epoch_end(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule") -> None:
+        if trainer.sanity_checking:
+            return
 
-            batch = next(iter(trainer.val_dataloaders))
-            self.log_predicted_images(batch, trainer, pl_module,
-                                      directory="val")
-            pl_module.train()
+        batch = next(iter(trainer.train_dataloader))
+        self.log_predicted_images(batch, trainer, pl_module,
+                                directory="train")
+
+        batch = next(iter(trainer.val_dataloaders))
+        self.log_predicted_images(batch, trainer, pl_module,
+                                directory="val")

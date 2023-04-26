@@ -1,4 +1,3 @@
-import os
 import sys
 import argparse
 
@@ -49,8 +48,10 @@ def parse_args(argv):
                         type=int,
                         choices=range(1, 5),
                         help="Which type of the model to choose:"
-                             "1 - SingleTask, 2 - MixedLatentMultitask, "
-                             "3 - SeparateLatentMultitask, 4 - SharedSeparateLatentMultitask")
+                             "1 - SingleTask, "
+                             "2 - MixedLatentMultitask, "
+                             "3 - SeparateLatentMultitask, "
+                             "4 - SharedSeparateLatentMultitask")
 
     parser.add_argument("-l",
                         "--latent-channels",
@@ -83,7 +84,8 @@ def parse_args(argv):
                         default=4,
                         type=int,
                         choices=range(1, 9),
-                        help="Quality of the pretrained model (bigger models have bigger latent size 192 vs 320")
+                        help="Quality of the pretrained model "
+                             "(bigger models have bigger latent size 192 vs 320")
 
     parser.add_argument(
         "-e",
@@ -149,7 +151,10 @@ DATASET_ROOTS = {FASHION_MNIST: "../data/fashion-mnist",
                  CLEVR: "../../vilabdatasets/clevr/clevr-taskonomy-complex/"}
 
 
-def get_dataloader(dataset_name: str, batch_size: int, num_workers: int, collate: Callable, is_train=False) -> Tuple[Dataset, DataLoader]:
+def get_dataloader(dataset_name: str, 
+                   batch_size: int, 
+                   num_workers: int, 
+                   collate: Callable, is_train=False) -> Tuple[Dataset, DataLoader]:
 
     root = DATASET_ROOTS[dataset_name]
 
@@ -173,7 +178,9 @@ def get_dataloader(dataset_name: str, batch_size: int, num_workers: int, collate
     else:
         raise NotImplementedError(f"Dataset {dataset_name} is not supported")
     
-    dataset = Subset(dataset, range(batch_size))
+    
+    dataset = Subset(dataset, range(batch_size))  # Use this only for local checking
+
     dataloader = DataLoader(dataset=dataset,
                             batch_size=batch_size,
                             num_workers=num_workers,
@@ -185,10 +192,12 @@ def get_dataloader(dataset_name: str, batch_size: int, num_workers: int, collate
 def main(args):
     pl.seed_everything(21)
 
+    # for this ID thing to work set WANDB_RUN_ID in environ
+    # TODO: Add to readme
     wandb_logger = WandbLogger(name=args.wandb_run_name,
                                project=WANDB_PROJECT_NAME,
                                log_model="all",
-                               id=args.wandb_run_name,  # for this to work WANDB_RUN_ID should be set in environ
+                            #    id=args.wandb_run_name,  
                                resume="allow")
 
     default_collate = make_collate_fn(args.tasks)
@@ -215,7 +224,7 @@ def main(args):
     elif args.model == 4:
         model_type = models.MultiTaskSharedLatentCompressor
     else:
-        raise NotImplementedError(f"Architecture number {args.model} is not available")
+        raise NotImplementedError(f"Architecture number {args.model} is not a valid choice")
 
 
 
@@ -233,13 +242,14 @@ def main(args):
                             learning_rate_main=args.learning_rate_main,
                             learning_rate_aux=args.learning_rate_aux)
 
-    wandb_logger.experiment.config.update({"architecture_type": compressor.get_model_name()}, allow_val_change=True)
+    wandb_logger.experiment.config.update({"architecture_type": compressor.get_model_name()},
+                                           allow_val_change=True)
 
     trainer = pl.Trainer(
         accelerator=args.accelerator,
         devices=args.devices,
         max_epochs=args.epochs,
-        check_val_every_n_epoch=1,
+        check_val_every_n_epoch=100,
         enable_progress_bar=True,
         logger=wandb_logger,
         callbacks=[callbacks.LogPredictionSamplesCallback(wandb_logger=wandb_logger),

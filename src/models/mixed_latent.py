@@ -51,11 +51,15 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
             **kwargs
     ):
         """
-        :param: compressor_backbone_class - type of the backbone compresion model
+        :param: compressor_backbone_class - type of the backbone
+                                            compresion model
         :param: tasks - list of task names
-        :param: input_channels - tuple with the number of channels of each task
-        :param: conv_channels - number of channels in the convolutions of each input head.
-                                which means that the compressor backbone get len(tasks) * conv_channels inputs as input
+        :param: input_channels - tuple with the number of channels
+                                 for each task
+        :param: conv_channels - number of channels in the convolutions
+                                of each input head.
+                                The compressor backbone gets
+                                len(tasks) * conv_channels channels as input
         :param: latent_channels - number of channels in the latent code (M)
         :param: lmbda - multiplier of the reconstruction loss in the total loss
         :param: pretrained - whether to use pretrained backbone compressor
@@ -81,7 +85,9 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
         self.pretrained = pretrained
 
         if self.pretrained:
-            print("Note that pretrained models have fixed size of latents, independent of specified 'latent_channels'")
+            print("Note that pretrained models"
+                 "have fixed size of latents,"
+                 "independent of specified 'latent_channels'")
 
         self.automatic_optimization = False
 
@@ -97,7 +103,8 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
         self.loss_balancer = UncertaintyWeightingStrategy(self.n_tasks)
 
         # TODO: move this to config
-        self.metrics = {"psnr": peak_signal_noise_ratio, "ms-ssim": ms_ssim}
+        self.metrics = {"psnr": peak_signal_noise_ratio,
+                         "ms-ssim": ms_ssim}
 
     def get_model_name(self):
         return self.__class__.__name__
@@ -107,8 +114,12 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
                      output_channels: Union[Tuple[int], int],
                      is_deconv=False) -> nn.ModuleList:
         """
-        :param: input_channels  - an integer or list of integers specifying the number of input channels of each task.
-        :param: output_channels - an integer or list of integers specifying the the number output channels for each t.
+        :param: input_channels  - an integer or list of integers 
+                                  specifying the number
+                                  of input channels of each task.
+        :param: output_channels - an integer or list of integers
+                                  specifying the the number output
+                                  channels for each t.
         """
 
         if type(input_channels) == int:
@@ -444,16 +455,16 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
 
         x_hats, likelihoods = self.forward(batch)
 
-        weighted_rec_loss, other_rec_logs = self.multitask_loss(x=batch, x_hats=x_hats, log_dir="train")
+        reconstruction_loss, other_rec_logs = self.multitask_loss(x=batch, x_hats=x_hats, log_dir="train")
 
         compression_loss, other_comp_logs = self.multitask_compression_loss(likelihoods=likelihoods,
                                                                             x_hats=x_hats,
                                                                             log_dir="train")
 
-        loss = self.lmbda * weighted_rec_loss + compression_loss
+        loss = self.lmbda * reconstruction_loss + compression_loss
 
         log_dict = {
-            "train/rec_loss": weighted_rec_loss,
+            "train/rec_loss": reconstruction_loss,
             "train/compression_loss": compression_loss,
             "train/loss": loss}
 
@@ -476,7 +487,7 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
 
         log_dict.update(metric_logs)
 
-        self.log_dict(log_dict, on_step=True, on_epoch=False, sync_dist=True)
+        self.log_dict(log_dict, on_step=True, on_epoch=False, sync_dist=True, prog_bar=True)
 
         return loss
 
@@ -484,16 +495,16 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         x_hats, likelihoods = self.forward(batch)
 
-        weighted_rec_loss, other_rec_logs = self.multitask_loss(x=batch, x_hats=x_hats, log_dir="val")
+        reconstruction_loss, other_rec_logs = self.multitask_loss(x=batch, x_hats=x_hats, log_dir="val")
 
         compression_loss, other_comp_logs = self.multitask_compression_loss(likelihoods=likelihoods,
                                                                             x_hats=x_hats,
                                                                             log_dir="val")
 
-        loss = self.lmbda * weighted_rec_loss + compression_loss
+        loss = self.lmbda * reconstruction_loss + compression_loss
 
         log_dict = {
-            "val/rec_loss": weighted_rec_loss,
+            "val/rec_loss": reconstruction_loss,
             "val/compression_loss": compression_loss,
             "val/loss": loss,
         }
@@ -505,7 +516,7 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
 
         log_dict.update(metric_logs)
 
-        self.log_dict(log_dict, on_step=False, on_epoch=True, sync_dist=True)
+        self.log_dict(log_dict, on_step=False, on_epoch=True, sync_dist=True, prog_bar=True)
         return loss
 
     def get_main_parameters(self):
@@ -515,7 +526,6 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
         return set(p for n, p in self.model.named_parameters() if n.endswith(".quantiles"))
 
     def configure_optimizers(self):
-
         main_optimizer = torch.optim.Adam(self.get_main_parameters(), lr=self.learning_rate_main)
         auxiliary_optimizer = torch.optim.Adam(self.get_auxiliary_parameters(), lr=self.learning_rate_aux)
 
