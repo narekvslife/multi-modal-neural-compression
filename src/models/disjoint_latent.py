@@ -103,7 +103,7 @@ class MultiTaskDisjointLatentCompressor(MultiTaskMixedLatentCompressor):
     def _build_heads(
         self,
         input_channels: Union[Tuple[int], int],
-        output_channels: Union[Tuple[int], int],
+        output_channels_per_head: Union[Tuple[int], int],
         is_deconv=False,
     ) -> nn.ModuleList:
         """
@@ -113,37 +113,44 @@ class MultiTaskDisjointLatentCompressor(MultiTaskMixedLatentCompressor):
         This way, for each of the output heads we need to add additional deconv layers
 
         :param: input_channels  - an integer or list of integers specifying the number of input channels of each task.
-        :param: output_channels - an integer or list of integers specifying the the number output channels for each t.
+        :param: output_channels_per_head - an integer or list of integers specifying the the number output channels for each t.
         """
 
-        module_list = super()._build_heads(input_channels, output_channels, is_deconv)
+        # Downsample and the last upsample layers are same as in the mixed latent
 
+        if is_deconv:
+            conv_channels = self.conv_channels // self.n_tasks
+            module_list = super()._build_heads(conv_channels, output_channels_per_head, is_deconv)
+        else:
+            module_list = super()._build_heads(input_channels, output_channels_per_head, is_deconv)
+
+        # The difference comes in because in the disjoint latent we
+        # removed the g_s function of the compressor to make sure we
+        # are in control of which latent goes where. 
+        # To keep reconstructions of the same size and to keep the
+        # number of parameters constant we need to add aditional upsample layers
         if is_deconv:
             if type(input_channels) == int:
                 input_channels = [input_channels for _ in self.tasks]
 
-            # in the beginning of each output head we prepend additional deconv layers
+            # In the beginning of each output head we prepend additional deconv layers
+            # to make up for the removed g_s of the compressor backbone.
+
+            # g_s that we removed had the following dimensions (cahnelwise)
+            # It went from self.conv_channels * n_tasks to self.latent_size having self.conv_channels in the middle
+            # Because we removed the g_s part, we need to make up for it in each task-specific part. 
+            # That's why each additional parts will have self.conv_channels // self.n_tasks in the middle
+            
+            
             for i in range(self.n_tasks):
                 module_list[i] = nn.Sequential(
-                    deconv(input_channels[i], input_channels[i] // 2, stride=4),
-                    GDN(input_channels[i] // 2, inverse=True),
-                    deconv(input_channels[i] // 2, input_channels[i] // 4, stride=4),
-                    GDN(input_channels[i] // 4, inverse=True),
-                    # some conv layers to reduce the checkerboard artifact of deconvolutions
-                    conv(
-                        input_channels[i] // 4,
-                        input_channels[i] // 2,
-                        kernel_size=3,
-                        stride=1,
-                    ),
-                    GDN(input_channels[i] // 2),
-                    conv(
-                        input_channels[i] // 2,
-                        input_channels[i],
-                        kernel_size=3,
-                        stride=1,
-                    ),
-                    GDN(input_channels[i]),
+                    deconv(input_channels[i], conv_channels),
+                    GDN(conv_channels, inverse=True),
+                    deconv(conv_channels, conv_channels),
+                    GDN(conv_channels, inverse=True),
+                    deconv(conv_channels, conv_channels),
+                    GDN(conv_channels, inverse=True),
+                    deconv(conv_channels, conv_channels),
                     module_list[i],
                 )
 
@@ -168,14 +175,13 @@ class MultiTaskDisjointLatentCompressor(MultiTaskMixedLatentCompressor):
 
         # first we build the task-specific input heads
         model["input_heads"] = self._build_heads(
-            input_channels=self.input_channels, output_channels=self.conv_channels
+            input_channels=self.input_channels, output_channels_per_head=self.conv_channels
         )
 
         # Note that we multiply self.conv_channels by the number of tasks,
         # because after the encoder heads we will have self.conv_channels channels from __each__ of the encoder heads
         total_task_channels = self.conv_channels * self.n_tasks
 
-        # in M by dividing and multiplying we
         model["compressor"] = self._build_compression_backbone(
             N=total_task_channels, M=self.latent_channels
         )

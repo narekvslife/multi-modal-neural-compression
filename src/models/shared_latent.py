@@ -97,7 +97,7 @@ class MultiTaskSharedLatentCompressor(MultiTaskMixedLatentCompressor):
 
         # first we build the task-specific input heads
         model["input_heads"] = self._build_heads(
-            input_channels=self.input_channels, output_channels=self.conv_channels
+            input_channels=self.input_channels, output_channels_per_head=self.conv_channels
         )
 
         # Note that we multiply self.conv_channels by the number of tasks,

@@ -12,7 +12,9 @@ task_parameters = {
         #         'mask_val': 1.0,
         "loss_function": "mse",
     },
-    "rgb": {"in_channels": 3, "out_channels": 3, "loss_function": "mse"},
+    "rgb": {"in_channels": 3,
+            "out_channels": 3, 
+            "loss_function": "mse"},
     "semantic": {
         "in_channels": 1,
         "out_channels": 17,
@@ -24,5 +26,8 @@ task_parameters = {
         "mask_val": 0.502,
         "loss_function": "mse",
     },
-    "mono": {"in_channels": 1, "out_channels": 1, "loss_function": "mse"},
+    "mono": {
+        "in_channels": 1,
+        "out_channels": 1, 
+        "loss_function": "mse"},  # l1
 }

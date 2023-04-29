@@ -167,6 +167,7 @@ def get_dataloader(
 ) -> Tuple[Dataset, DataLoader]:
     root = DATASET_ROOTS[dataset_name]
 
+    # TODO: add image resize params to config
     default_transform = transforms.Compose(
         [transforms.Resize((256, 256)), transforms.ToTensor()]
     )

@@ -113,35 +113,35 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
     def _build_heads(
         self,
         input_channels: Union[Tuple[int], int],
-        output_channels: Union[Tuple[int], int],
+        output_channels_per_head: Union[Tuple[int], int],
         is_deconv=False,
     ) -> nn.ModuleList:
         """
         :param: input_channels  - an integer or list of integers
-                                  specifying the number
-                                  of input channels of each task.
-        :param: output_channels - an integer or list of integers
-                                  specifying the the number output
-                                  channels for each t.
+                                  specifying the number of input
+                                  *channels for each task*.
+        :param: output_channels_per_head - an integer or list of integers
+                                  specifying the the number of output
+                                  *channels for each task*.
         """
 
         if type(input_channels) == int:
             input_channels = tuple(input_channels for _ in range(self.n_tasks))
+        
+        assert len(input_channels) == self.n_tasks
+            
+        if type(output_channels_per_head) == int:
+            output_channels_per_head = [output_channels_per_head for _ in range(self.n_tasks)]
 
-        if type(output_channels) == int:
-            per_task_output_channels = [output_channels for _ in range(self.n_tasks)]
-        else:
-            per_task_output_channels = output_channels
+        assert len(output_channels_per_head) == self.n_tasks
 
         list_of_modules = []
 
         for t_i in range(self.n_tasks):
             i_c = input_channels[t_i]
-            pto_c = per_task_output_channels[
-                t_i
-            ]  # output channels for each task (head)
+            pto_c = output_channels_per_head[t_i]  # output channels for each task (head)
             pti_c = (
-                pto_c * 2 if is_deconv else pto_c // 2
+                i_c // 2 if is_deconv else pto_c // 2
             )  # intermediate channels for each task (head)
 
             if is_deconv:
@@ -198,7 +198,7 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
             )
 
         # This is the part that i have to deal with because in the CompressAI models
-        # the default input and output dimensions is a hardcoded 3
+        # the default input and output dimension is a hardcoded 3
 
         model.g_a[0] = conv(N, model.N)
         model.g_s[-1] = deconv(model.N, N)
@@ -220,7 +220,7 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
 
         # first we need to build the task-specific input heads
         model["input_heads"] = self._build_heads(
-            input_channels=self.input_channels, output_channels=self.conv_channels
+            input_channels=self.input_channels, output_channels_per_head=self.conv_channels
         )
 
         # Note that we multiply self.conv_channels by the number of tasks,
@@ -303,13 +303,18 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
         """
 
         stacked_t = self.forward_input_heads(batch)
+        # compressor_inputs = self.forward_heads(batch, "input_heads")
+        # torch.concat(compressor_inputs, dim=1)
 
         compressor_outputs = self.model["compressor"](stacked_t)
+        # compressor_outputs = self.model["compressor"](compressor_inputs)
 
         stacked_t_hat = compressor_outputs["x_hat"]
-        stacked_t_likelihoods = compressor_outputs[
-            "likelihoods"
-        ]  # {"y": y_likelihoods, "z": z_likelihoods}
+        # compressor_outputs_hat = compressor_outputs["x_hat"]
+
+        # {"y": y_likelihoods, "z": z_likelihoods}
+        stacked_t_likelihoods = compressor_outputs["likelihoods"]
+        # compressor_outputs_likelihoods = compressor_outputs["likelihoods"]
 
         # x_hats = {"task1": [torch_tensor_1_1_hat, ..., torch_tensor_B_1_hat], ... }
         x_hats = self.forward_output_heads(stacked_t_hat)
@@ -330,6 +335,11 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
 
         if loss_type == "mse":
             loss = F.mse_loss(x, x_hat, reduction="none")
+            # sum over all dimensions, average over batch dimension
+            # and over channels so that images with different channels have the same effect
+            loss = loss.sum(dim=[1, 2, 3]).mean(dim=[0]) / x.shape[1]
+        elif loss_type == "l1":
+            loss = F.l1_loss(x, x_hat, reduction="none")
             # sum over all dimensions, average over batch dimension
             # and over channels so that images with different channels have the same effect
             loss = loss.sum(dim=[1, 2, 3]).mean(dim=[0]) / x.shape[1]
