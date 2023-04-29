@@ -78,11 +78,11 @@ class MultiTaskSharedLatentCompressor(MultiTaskMixedLatentCompressor):
         B, _, H, W = x_hats[task].shape
         return B * H * W
 
-    def __build_task_compressors(self, N: int, M: int):
+    def __build_task_compressors(self, input_channels: int, latent_channels: int):
         compressors = nn.ModuleList()
 
         for _ in self.tasks:
-            compressors.append(self._build_compression_backbone(N=N, M=M))
+            compressors.append(self._build_compression_backbone(input_channels=input_channels, latent_channels=latent_channels))
 
         return compressors
 
@@ -105,11 +105,11 @@ class MultiTaskSharedLatentCompressor(MultiTaskMixedLatentCompressor):
         total_task_channels = self.conv_channels * self.n_tasks
 
         model["compressor_shared"] = self._build_compression_backbone(
-            N=total_task_channels, M=self.latent_channels
+            input_channels=total_task_channels, latent_channels=self.latent_channels
         )
 
         model["compressors_tasks"] = self.__build_task_compressors(
-            N=total_task_channels, M=self.latent_channels
+            input_channels=total_task_channels, latent_channels=self.latent_channels
         )
 
         # Each decoder head gets as the sum of task specific and shared latent, which still has #total_task_channels

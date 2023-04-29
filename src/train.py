@@ -147,10 +147,7 @@ def parse_args(argv):
     args = parser.parse_args(argv)
     return args
 
-
-BATCH_SIZE = 16
-LATENT_CHANNELS = 90
-
+# TODO: move this paths to configs
 DATASET_ROOTS = {
     FASHION_MNIST: "../data/fashion-mnist",
     MNIST: "../data/mnist",

@@ -168,7 +168,7 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
 
         return nn.ModuleList(list_of_modules)
 
-    def _build_compression_backbone(self, N: int, M: int) -> nn.Module:
+    def _build_compression_backbone(self, input_channels: int, latent_channels: int) -> nn.Module:
         """
         :param N: - number of channels for each convolution layer of the compression model
         :param M: - number of latent channels (in the latent code) that later will be compressed
@@ -189,19 +189,18 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
                 )
 
         else:
-            model = self.compressor_backbone_class(N=N, M=M, **self.kwargs)
+            model = self.compressor_backbone_class(N=input_channels, M=latent_channels, **self.kwargs)
 
-        if M != model.M:
+        if latent_channels != model.M:
             print(
                 f"Note that the pretrained {self.compressor_backbone_class} has a fixed latent size M={model.M}, "
-                f"which is different from the specified M={M}"
+                f"which is different from the specified M={latent_channels}"
             )
 
         # This is the part that i have to deal with because in the CompressAI models
         # the default input and output dimension is a hardcoded 3
-
-        model.g_a[0] = conv(N, model.N)
-        model.g_s[-1] = deconv(model.N, N)
+        model.g_a[0] = conv(input_channels,input_channels)
+        model.g_s[-1] = deconv(input_channels, input_channels)
 
         return model
 
@@ -230,7 +229,7 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
 
         # these task-specific channels are stacked and passed to the default CompressAI model
         model["compressor"] = self._build_compression_backbone(
-            N=total_task_channels, M=self.latent_channels
+            input_channels=total_task_channels, latent_channels=self.latent_channels
         )
 
         # now that mixed representations should be passed to task-specific output heads
@@ -244,10 +243,10 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
         """
         :param: batch - expected to be of the following form
                 {
-                 "task1": [torch_tensor_1_1, torch_tensor_2_1, ..., torch_tensor_B_1,
-                 "task2": [torch_tensor_1_2, torch_tensor_2_2, ..., torch_tensor_B_2,
+                 "task1": [torch_tensor_1_1, torch_tensor_2_1, ..., torch_tensor_B_1],
+                 "task2": [torch_tensor_1_2, torch_tensor_2_2, ..., torch_tensor_B_2],
                   ...
-                 "taskM": [torch_tensor_1_M, torch_tensor_2_M, ..., torch_tensor_B_M,
+                 "taskM": [torch_tensor_1_M, torch_tensor_2_M, ..., torch_tensor_B_M],
                 }
 
         :returns: embeddings after each head stacked on the channel dimension.
