@@ -267,10 +267,10 @@ class MultiTaskMixedLatentCompressor(pl.LightningModule):
 
         :returns: Task specific predictions
                 {
-                 "task1": [torch_tensor_1_1, torch_tensor_2_1, ..., torch_tensor_B_1,
-                 "task2": [torch_tensor_1_2, torch_tensor_2_2, ..., torch_tensor_B_2,
+                 "task1": [torch_tensor_1_1, torch_tensor_2_1, ..., torch_tensor_B_1],
+                 "task2": [torch_tensor_1_2, torch_tensor_2_2, ..., torch_tensor_B_2],
                   ...
-                 "taskM": [torch_tensor_1_M, torch_tensor_2_M, ..., torch_tensor_B_M,
+                 "taskM": [torch_tensor_1_M, torch_tensor_2_M, ..., torch_tensor_B_M],
                 }
         """
         x_hats = {}
