@@ -148,14 +148,8 @@ class MultiTaskDisjointLatentCompressor(MultiTaskMixedLatentCompressor):
         :param: output_channels_per_head - an integer or list of integers specifying the the number output channels for each t.
         """
 
-        module_list = nn.ModuleList()
-        
-        if type(input_channels) == int:
-                input_channels = [input_channels for _ in self.tasks]
-
         if is_deconv:
-            # In the beginning of each output head we prepend additional deconv layers
-            # to make up for the removed g_s of the compressor backbone.
+            module_list = nn.ModuleList()
 
             # g_s that we removed had the following dimensions (cahnelwise)
             # It went from self.conv_channels * n_tasks to self.latent_size having self.conv_channels in the middle
@@ -163,23 +157,29 @@ class MultiTaskDisjointLatentCompressor(MultiTaskMixedLatentCompressor):
             # That's why each additional parts will have self.conv_channels // self.n_tasks in the middle
             conv_channels = self.conv_channels // self.n_tasks
             output_heads = super()._build_heads(self.conv_channels, output_channels_per_head, is_deconv)
-
+        
             for i in range(self.n_tasks):
                 
-                module_list.append(nn.Sequential(
-                    deconv(input_channels[i], conv_channels),
+                # In the beginning of each output head we prepend additional deconv layers
+                # to make up for the removed g_s of the compressor backbone.
+                upsample = nn.Sequential(
+                    # This are additional upsample layers to make up for the removed g_s
+                    deconv(input_channels, conv_channels),
                     GDN(conv_channels, inverse=True),
                     deconv(conv_channels, conv_channels),
                     GDN(conv_channels, inverse=True),
                     deconv(conv_channels, conv_channels),
                     GDN(conv_channels, inverse=True),
                     deconv(conv_channels, self.conv_channels),
-                    output_heads[i]
-                ))
-        else:
-            module_list = super()._build_heads(input_channels, output_channels_per_head, is_deconv)
+                    
+                    # these are the decoder heads
+                    output_heads[i])
+                
+                module_list.append(upsample)
 
-        return module_list
+            return module_list
+        else:
+            return super()._build_heads(input_channels, output_channels_per_head, is_deconv)
 
     def _build_model(self) -> nn.ModuleDict:
 
