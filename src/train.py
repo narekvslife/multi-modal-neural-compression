@@ -255,7 +255,6 @@ def main(args):
         output_channels=output_channels,
         latent_channels=args.latent_channels,
         conv_channels=args.conv_channels,
-        quality=args.quality,
         lmbda=args.lmbda,
         learning_rate_main=args.learning_rate_main,
         learning_rate_aux=args.learning_rate_aux,

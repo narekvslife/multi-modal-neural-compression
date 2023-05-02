@@ -26,8 +26,6 @@ class SingleTaskCompressor(MultiTaskMixedLatentCompressor):
         latent_channels: int,
         conv_channels: int,
         lmbda: float = 1,
-        pretrained: bool = False,
-        quality: int = 4,
         learning_rate_main=1e-5,
         learning_rate_aux=1e-3,
         **kwargs
@@ -48,8 +46,6 @@ class SingleTaskCompressor(MultiTaskMixedLatentCompressor):
             conv_channels=conv_channels,
             latent_channels=latent_channels,
             lmbda=lmbda,
-            pretrained=pretrained,
-            quality=quality,
             learning_rate_main=learning_rate_main,
             learning_rate_aux=learning_rate_aux,
             **kwargs

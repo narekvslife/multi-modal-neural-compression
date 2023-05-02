@@ -4,14 +4,14 @@ import torch
 import torch.nn as nn
 
 from compressai.layers import GDN
-from compressai.models.utils import conv, deconv
-from models import MultiTaskMixedLatentCompressor
+from compressai.models.utils import deconv
+from models import MultiTaskCompressor
 
 
 from utils import DummyModule
 
 
-class MultiTaskDisjointLatentCompressor(MultiTaskMixedLatentCompressor):
+class MultiTaskDisjointLatentCompressor(MultiTaskCompressor):
     """
     A compressor network which compresses multiple tasks with the codes being separable by task.
     Meaning we would only need a subset of codes to decode a subset of tasks.
@@ -46,8 +46,6 @@ class MultiTaskDisjointLatentCompressor(MultiTaskMixedLatentCompressor):
         latent_channels: int,
         conv_channels: int,
         lmbda: float = 1,
-        pretrained: bool = False,
-        quality: int = 4,
         learning_rate_main=1e-5,
         learning_rate_aux=1e-3,
         **kwargs,
@@ -62,8 +60,6 @@ class MultiTaskDisjointLatentCompressor(MultiTaskMixedLatentCompressor):
             conv_channels=conv_channels,
             latent_channels=latent_channels,
             lmbda=lmbda,
-            pretrained=pretrained,
-            quality=quality,
             learning_rate_main=learning_rate_main,
             learning_rate_aux=learning_rate_aux,
             **kwargs,
@@ -78,7 +74,7 @@ class MultiTaskDisjointLatentCompressor(MultiTaskMixedLatentCompressor):
             )
             self.latent_channels = self.latent_channels_per_task * self.n_tasks
 
-    def _get_task_channels(
+    def __get_task_channels(
         self, tensor: torch.Tensor, task: str
     ) -> torch.Tensor:
         """
@@ -100,18 +96,6 @@ class MultiTaskDisjointLatentCompressor(MultiTaskMixedLatentCompressor):
 
         return tensor[:, channel_l:channel_r, :, :]
     
-    def _get_number_of_pixels(self, x_hats: Dict[str, torch.Tensor], task: str) -> int:
-        """
-        Number of pixels that the code of each task stores
-
-        :param x_hats:
-        :param task:
-        :return:
-        """
-        B, _, H, W = x_hats[task].shape
-        return B * H * W
-
-    # TODO: Maybe this functio should be in the base class
     def _get_task_likelihoods(
         self, likelihoods: Dict[str, torch.Tensor], task: str
     ) -> Dict[str, torch.Tensor]:
@@ -119,18 +103,15 @@ class MultiTaskDisjointLatentCompressor(MultiTaskMixedLatentCompressor):
         In this model the information about each task is in the specific channels of the "y" latent.
         The number of channels is equal for all tasks. Note that we still use all of the "z" latents
 
-        # todo: document why multiple keys in likelihoods
-
         :param likelihoods:
         :param task:
         :return:
         """
 
         return {
-            "y": self._get_task_channels(likelihoods["y"], task),
+            "y": self.__get_task_channels(likelihoods["y"], task),
             "z": likelihoods["z"],
         }
-
 
     def _build_heads(
         self,
@@ -202,23 +183,21 @@ class MultiTaskDisjointLatentCompressor(MultiTaskMixedLatentCompressor):
 
         return model
 
-    def forward_output_heads(self, batch) -> Dict[str, torch.Tensor]:
-        """
-        :param: batch - expected to be of the shape (B, self.latent_channels, W, H)
+    def forward(self, batch) -> Tuple[Dict[str, torch.Tensor], Dict[str, torch.Tensor]]:
 
-        :returns: Task specific predictions
-                {
-                 "task1": [torch_tensor_1_1, torch_tensor_2_1, ..., torch_tensor_B_1],
-                 "task2": [torch_tensor_1_2, torch_tensor_2_2, ..., torch_tensor_B_2],
-                  ...
-                 "taskM": [torch_tensor_1_M, torch_tensor_2_M, ..., torch_tensor_B_M],
-                }
-        """
+        stacked_t = self.forward_input_heads(batch)
+
+        compressor_outputs = self.model["compressor"](stacked_t)
+
+        stacked_t_hat = compressor_outputs["x_hat"]
+
+        # {"y": y_likelihoods, "z": z_likelihoods}
+        stacked_t_likelihoods = compressor_outputs["likelihoods"]
+
+        # x_hats = {"task1": [torch_tensor_1_1_hat, ..., torch_tensor_B_1_hat], ... }
         x_hats = {}
+        for task_i, task in enumerate(self.tasks):
+            task_values = self.__get_task_channels(stacked_t_hat, task)
+            x_hats[task] = self.model["output_heads"][task_i](task_values)
 
-        for task_n, task in enumerate(self.tasks):
-            task_values = self._get_task_channels(batch, task)
-
-            x_hats[task] = self.model["output_heads"][task_n](task_values)
-
-        return x_hats
+        return x_hats, stacked_t_likelihoods
