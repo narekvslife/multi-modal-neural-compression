@@ -18,7 +18,7 @@ from torchmetrics.functional.image.psnr import peak_signal_noise_ratio
 from compressai.layers import GDN
 from compressai.models.utils import conv, deconv
 
-from datasets.task_configs import task_parameters
+from datasets import task_configs
 
 from loss_balancing import UncertaintyWeightingStrategy
 
@@ -271,7 +271,7 @@ class MultiTaskCompressor(pl.LightningModule):
         logs = dict()
 
         for task in self.tasks:
-            loss_name = task_parameters[task]["loss_function"]
+            loss_name = task_configs.task_parameters[task]["loss_function"]
             task_losses[task] = self.reconstruction_loss(
                 x=x[task], x_hat=x_hats[task], loss_type=loss_name
             )

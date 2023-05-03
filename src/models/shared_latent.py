@@ -1,4 +1,4 @@
-from typing import Tuple
+from typing import Dict, Tuple
 
 import torch
 
@@ -51,7 +51,14 @@ class MultiTaskSharedLatentCompressor(MultiTaskDisjointLatentCompressor):
             **kwargs,
         )
 
+        self.task_specific_channels_n = self.latent_channels // (self.n_tasks + 1)
+
+
+    def __get_shared_channels(
+        self, tensor: torch.Tensor
+    ) -> torch.Tensor:
         
+        return tensor[:, -self.task_specific_channels_n: , :, :]
 
     def _get_task_channels(
         self, tensor: torch.Tensor, task: str
@@ -60,13 +67,6 @@ class MultiTaskSharedLatentCompressor(MultiTaskDisjointLatentCompressor):
         This function expects a 4d tensor of type (B, C, H, W) and returns a subset of values which refer to a particular
         task. 
 
-        Since each of our heads takes in self.latent_channels_per_task channels as input
-        we can dedicate half of those channels to be the shared ones and the rest
-        to be task-specific.
-
-        For this we dedicate self.latent_channels_per_task // 2 channels for each task to the task-specific
-        part of the latent. And the remainning channels to 
-
         :param latent_tensor:
         :param task:
         :return:
@@ -74,17 +74,72 @@ class MultiTaskSharedLatentCompressor(MultiTaskDisjointLatentCompressor):
 
         assert len(tensor.shape) == 4
 
-        B, _, H, W = tensor.shape
-
         task_index = self.tasks.index(task)
 
-        task_specific_channels_n = self.latent_channels // (self.n_tasks + 1)
+        channel_l = task_index * self.task_specific_channels_n
+        channel_r = (task_index + 1) * self.task_specific_channels_n
 
-        channel_l = task_index * task_specific_channels_n
-        channel_r = (task_index + 1) * task_specific_channels_n
+        return tensor[:, channel_l: channel_r, :, :]
+    
+    def _get_task_likelihoods(
+        self, likelihoods: Dict[str, torch.Tensor], task: str
+    ) -> Dict[str, torch.Tensor]:
 
-        task_specific_channels = tensor[:, channel_l: channel_r, :, :]
 
-        shared_channels = tensor[:, -task_specific_channels_n: , :, :]
+        if task == "shared":
+            return {
+            "y": self.__get_shared_channels(likelihoods["y"]),
+            # "z": likelihoods["z"],
+        }
+        else:
+            return {
+                "y": self._get_task_channels(likelihoods["y"], task),
+                "z": likelihoods["z"],
+            }
 
-        return torch.stack([task_specific_channels, shared_channels], dim=1).reshape((B, -1, H, W))
+    def multitask_compression_loss(
+        self,
+        all_likelihoods: Dict[str, torch.Tensor],
+        x_hats: Dict[str, torch.Tensor],
+        log_dir: str,
+    ) -> Tuple[float, Dict[str, float]]:
+        
+        # at this point we only have task-specific parts, without the shared part
+        total_loss, logs = super().multitask_compression_loss(all_likelihoods, x_hats, log_dir)
+
+        total_pixels = sum([self._get_number_of_pixels(x_hats, task) for task in self.tasks])
+
+        shared_compression_loss =  self._compression_loss(
+            self._get_task_likelihoods(all_likelihoods, "shared"),
+            total_pixels)
+
+        logs[f"{log_dir}/shared/compression_loss"] = shared_compression_loss
+
+        total_loss += shared_compression_loss
+
+        return total_loss, logs
+
+    def forward(self, batch) -> Tuple[Dict[str, torch.Tensor], Dict[str, torch.Tensor]]:
+
+        stacked_t = self.forward_input_heads(batch)
+
+        compressor_outputs = self.model["compressor"](stacked_t)
+
+        stacked_t_hat = compressor_outputs["x_hat"]
+
+        # {"y": y_likelihoods, "z": z_likelihoods}
+        stacked_t_likelihoods = compressor_outputs["likelihoods"]
+
+        B, _, H, W = stacked_t_hat.shape
+
+        # x_hats = {"task1": [torch_tensor_1_1_hat, ..., torch_tensor_B_1_hat], ... }
+        x_hats = {}
+        for task_i, task in enumerate(self.tasks):
+            task_values = self._get_task_channels(stacked_t_hat, task)
+            shared_values = self.__get_shared_channels(stacked_t_hat)
+
+            stacked_values = torch.stack([task_values, shared_values], dim=1).reshape((B, -1, H, W))
+
+            x_hats[task] = self.model["output_heads"][task_i](stacked_values)
+
+        return x_hats, stacked_t_likelihoods
