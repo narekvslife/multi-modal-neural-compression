@@ -74,7 +74,7 @@ class MultiTaskDisjointLatentCompressor(MultiTaskCompressor):
             )
             self.latent_channels = self.latent_channels_per_task * self.n_tasks
 
-    def __get_task_channels(
+    def _get_task_channels(
         self, tensor: torch.Tensor, task: str
     ) -> torch.Tensor:
         """
@@ -109,7 +109,7 @@ class MultiTaskDisjointLatentCompressor(MultiTaskCompressor):
         """
 
         return {
-            "y": self.__get_task_channels(likelihoods["y"], task),
+            "y": self._get_task_channels(likelihoods["y"], task),
             "z": likelihoods["z"],
         }
 
@@ -197,7 +197,7 @@ class MultiTaskDisjointLatentCompressor(MultiTaskCompressor):
         # x_hats = {"task1": [torch_tensor_1_1_hat, ..., torch_tensor_B_1_hat], ... }
         x_hats = {}
         for task_i, task in enumerate(self.tasks):
-            task_values = self.__get_task_channels(stacked_t_hat, task)
+            task_values = self._get_task_channels(stacked_t_hat, task)
             x_hats[task] = self.model["output_heads"][task_i](task_values)
 
         return x_hats, stacked_t_likelihoods
