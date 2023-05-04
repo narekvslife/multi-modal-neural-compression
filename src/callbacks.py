@@ -2,6 +2,8 @@ from typing import Any
 
 import torch
 
+from torch.utils.data import DataLoader
+
 import pytorch_lightning as pl
 from pytorch_lightning import Callback
 from pytorch_lightning.loggers import WandbLogger
@@ -59,5 +61,6 @@ class LogPredictionSamplesCallback(Callback):
         batch = next(iter(trainer.train_dataloader))
         self.log_predicted_images(batch, trainer, pl_module, directory="train")
 
-        batch = next(iter(trainer.val_dataloaders))
+        val_dl = trainer.val_dataloaders if type(trainer.val_dataloaders) == DataLoader else trainer.val_dataloaders[0]
+        batch = next(iter(val_dl))
         self.log_predicted_images(batch, trainer, pl_module, directory="val")
