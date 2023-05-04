@@ -248,7 +248,7 @@ def main(args):
         accelerator=args.accelerator,
         devices=args.devices,
         max_epochs=args.epochs,
-        check_val_every_n_epoch=100,
+        check_val_every_n_epoch=1,
         enable_progress_bar=True,
         logger=wandb_logger,
         callbacks=[
