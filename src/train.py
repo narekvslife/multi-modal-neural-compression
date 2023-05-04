@@ -76,23 +76,6 @@ def parse_args(argv):
     )
 
     parser.add_argument(
-        "-p",
-        "--pretrained",
-        type=bool,
-        default=False,
-        help="Whether to use pretrained backbone or not",
-    )
-    parser.add_argument(
-        "-q",
-        "--quality",
-        default=4,
-        type=int,
-        choices=range(1, 9),
-        help="Quality of the pretrained model "
-        "(bigger models have bigger latent size 192 vs 320",
-    )
-
-    parser.add_argument(
         "-e",
         "--epochs",
         default=100,
@@ -184,7 +167,7 @@ def get_dataloader(
     else:
         raise NotImplementedError(f"Dataset {dataset_name} is not supported")
 
-    dataset = Subset(dataset, range(batch_size))  # Use this only for local checking
+    # dataset = Subset(dataset, range(batch_size))  # Use this only for local checking
 
     dataloader = DataLoader(
         dataset=dataset,
@@ -199,13 +182,10 @@ def get_dataloader(
 def main(args):
     pl.seed_everything(21)
 
-    # for this ID thing to work set WANDB_RUN_ID in environ
-    # TODO: Add to readme
     wandb_logger = WandbLogger(
         name=args.wandb_run_name,
         project=WANDB_PROJECT_NAME,
         log_model="all",
-        #    id=args.wandb_run_name,
         resume="allow",
     )
 

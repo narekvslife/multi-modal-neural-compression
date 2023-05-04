@@ -85,7 +85,6 @@ class MultiTaskSharedLatentCompressor(MultiTaskDisjointLatentCompressor):
         self, likelihoods: Dict[str, torch.Tensor], task: str
     ) -> Dict[str, torch.Tensor]:
 
-
         if task == "shared":
             return {
             "y": self.__get_shared_channels(likelihoods["y"]),
@@ -103,7 +102,7 @@ class MultiTaskSharedLatentCompressor(MultiTaskDisjointLatentCompressor):
         x_hats: Dict[str, torch.Tensor],
         log_dir: str,
     ) -> Tuple[float, Dict[str, float]]:
-        
+
         # at this point we only have task-specific parts, without the shared part
         total_loss, logs = super().multitask_compression_loss(all_likelihoods, x_hats, log_dir)
 
