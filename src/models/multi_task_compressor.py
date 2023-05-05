@@ -285,7 +285,7 @@ class MultiTaskCompressor(pl.LightningModule):
         return weighted_loss, logs
 
     def _compression_loss(
-        self, likelihoods: Dict[str, torch.Tensor], num_pixels
+        self, likelihoods: torch.Tensor, num_pixels
     ) -> float:
         """
         Compute Bits Per Pixel
@@ -296,9 +296,7 @@ class MultiTaskCompressor(pl.LightningModule):
 
         compression_loss = 0
 
-        # TODO: document why multiple keys
-        for _, _likelihoods in likelihoods.items():
-            compression_loss += torch.log(_likelihoods).sum()
+        compression_loss = torch.log(likelihoods).sum()
 
         compression_loss /= -torch.log(torch.tensor(2))
         compression_loss /= num_pixels
@@ -331,18 +329,31 @@ class MultiTaskCompressor(pl.LightningModule):
         logs = dict()
 
         for task in self.tasks:
+
             task_likelihoods = self._get_task_likelihoods(all_likelihoods, task)
 
             task_num_pixels = self._get_number_of_pixels(x_hats, task)
 
-            task_compression_loss = self._compression_loss(
-                likelihoods=task_likelihoods, num_pixels=task_num_pixels
-            )
+            # --- TODO: This part is very ScaleHyperprior specific 
+            task_compression_loss = 0
+            for latent_type in ('y', 'z'):
+                task_compression_loss += self._compression_loss(
+                    likelihoods=task_likelihoods[latent_type],
+                    num_pixels=task_num_pixels
+                )
+            # --- 
 
             logs[f"{log_dir}/{task}/compression_loss"] = task_compression_loss
     
             total_loss += task_compression_loss
-        
+
+        # --- TODO: This part is very ScaleHyperprior specific 
+        total_loss -= self._compression_loss(
+                likelihoods=all_likelihoods["z"],
+                num_pixels=task_num_pixels
+            ) * (self.n_tasks - 1)
+        # --- 
+
         return total_loss, logs
 
     def average_metrics(self, x, x_hats, log_dir: str) -> Dict[str, float]:

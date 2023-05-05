@@ -87,14 +87,11 @@ class MultiTaskSharedLatentCompressor(MultiTaskDisjointLatentCompressor):
 
         if task == "shared":
             return {
-            "y": self.__get_shared_channels(likelihoods["y"]),
-            # "z": likelihoods["z"],
-        }
-        else:
-            return {
-                "y": self._get_task_channels(likelihoods["y"], task),
+                "y": self.__get_shared_channels(likelihoods["y"]),
                 "z": likelihoods["z"],
             }
+        else:
+            return super()._get_task_likelihoods(likelihoods, task)
 
     def multitask_compression_loss(
         self,
@@ -108,9 +105,20 @@ class MultiTaskSharedLatentCompressor(MultiTaskDisjointLatentCompressor):
 
         total_pixels = sum([self._get_number_of_pixels(x_hats, task) for task in self.tasks])
 
-        shared_compression_loss =  self._compression_loss(
-            self._get_task_likelihoods(all_likelihoods, "shared"),
-            total_pixels)
+        # --- TODO: This part is very ScaleHyperprior specific 
+        shared_compression_loss = 0
+        shared_likelihoods = self._get_task_likelihoods(all_likelihoods, "shared")
+        
+        for latent_type in ('y', 'z'):
+            shared_compression_loss += self._compression_loss(
+                likelihoods=shared_likelihoods[latent_type],
+                num_pixels=total_pixels
+            )
+
+        total_loss -= self._compression_loss(
+                    likelihoods=shared_likelihoods["z"],
+                    num_pixels=total_pixels)
+        # ---
 
         logs[f"{log_dir}/shared/compression_loss"] = shared_compression_loss
 
