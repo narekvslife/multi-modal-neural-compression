@@ -1,8 +1,10 @@
 from typing import Dict, Tuple
 
 import torch
+import torch.nn as nn
 
 from models import MultiTaskDisjointLatentCompressor
+from utils import DummyModule
 
 class MultiTaskSharedLatentCompressor(MultiTaskDisjointLatentCompressor):
     """
@@ -38,6 +40,9 @@ class MultiTaskSharedLatentCompressor(MultiTaskDisjointLatentCompressor):
                   "to each task and the shared part\n\n")
             latent_channels = new_latent_channels
         
+
+        self.task_specific_channels_n = latent_channels // (n_tasks + 1)
+
         super().__init__(
             compressor_backbone_class=compressor_backbone_class,
             tasks=tasks,
@@ -51,8 +56,27 @@ class MultiTaskSharedLatentCompressor(MultiTaskDisjointLatentCompressor):
             **kwargs,
         )
 
-        self.task_specific_channels_n = self.latent_channels // (self.n_tasks + 1)
 
+    def _build_model(self) -> nn.ModuleDict:
+
+        model = nn.ModuleDict()
+
+        model["input_heads"] = self._build_heads(
+            input_channels=self.input_channels, output_channels_per_head=self.conv_channels
+        )
+
+        total_task_channels = self.conv_channels * self.n_tasks
+
+        model["compressor"] = self._build_compression_backbone(
+            input_channels=total_task_channels, latent_channels=self.latent_channels
+        )
+        model["compressor"].g_s = DummyModule()
+
+        model["output_heads"] = self._build_heads(
+            self.task_specific_channels_n * 2, self.output_channels, is_deconv=True
+        )
+
+        return model
 
     def __get_shared_channels(
         self, tensor: torch.Tensor
