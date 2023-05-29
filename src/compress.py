@@ -7,6 +7,7 @@ import torch
 import models
 import datasets
 import train
+import utils
 
 def parse_args(argv):
     parser = argparse.ArgumentParser(description="Example training script.")
@@ -101,23 +102,20 @@ def main(args):
 
     compressor.update_bottleneck_values()
 
-    import matplotlib.pyplot as plt
-
     for batch in dataloader:
         compressed_data = compressor.compress(batch)
         strings, shape = compressed_data["strings"], compressed_data["shape"]
         decompressed_data = compressor.decompress(strings, shape)
 
         decompressed_image = decompressed_data["depth_euclidean"][3].detach().permute(1, 2, 0)
+
         forwarded_image, _ = compressor(batch)
         forwarded_image = forwarded_image["depth_euclidean"][3].detach().permute(1, 2, 0) 
-        # original_image = batch["depth_euclidean"][3].detach().permute(1, 2, 0)
-
-        plt.imshow(decompressed_image)
-        plt.imshow(forwarded_image)
-        # plt.imshow(original_image)
         
-        plt.show()
+        original_image = batch["depth_euclidean"][3].detach().permute(1, 2, 0)
+
+        utils.show_images([decompressed_image, forwarded_image, original_image])
+        break
 
 
 if __name__ == "__main__":

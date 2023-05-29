@@ -520,5 +520,16 @@ class MultiTaskCompressor(pl.LightningModule):
         return ans
 
     def decompress(self, strings, shape):        
-        stacked_latent_values = self.model["compressor"].decompress(strings, shape)["x_hat"]
-        return self.forward_output_heads(stacked_latent_values)
+        # stacked_latent_values = self.model["compressor"].decompress(strings, shape)["x_hat"]
+
+        # had to rewrite here the decompress() function 
+        # from ScaleHyperprior because in the end they
+        # do .clamp(0, 1) which messes everything up for us
+        assert isinstance(strings, list) and len(strings) == 2
+        z_hat = self.model["compressor"].entropy_bottleneck.decompress(strings[1], shape)
+        scales_hat = self.model["compressor"].h_s(z_hat)
+        indexes = self.model["compressor"].gaussian_conditional.build_indexes(scales_hat)
+        y_hat = self.model["compressor"].gaussian_conditional.decompress(strings[0], indexes, z_hat.dtype)
+        x_hat = self.model["compressor"].g_s(y_hat)
+
+        return self.forward_output_heads(x_hat)
