@@ -32,8 +32,8 @@ class LogPredictionSamplesCallback(Callback):
 
             kwargs = {}
 
-            pred_images = [xh for xh in x_hats_task]
-            target_images = [x for x in batch[task]]
+            pred_images = [xh for xh in x_hats_task][:8]
+            target_images = [x for x in batch[task]][:8]
 
             self.wandb_logger.log_image(key=pred_key, images=pred_images, **kwargs)
 
