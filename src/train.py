@@ -30,7 +30,6 @@ def parse_args(argv):
     parser.add_argument(
         "-d", "--dataset", type=str, required=True, help="Training dataset"
     )
-
     parser.add_argument(
         "-t",
         "--tasks",
@@ -39,7 +38,6 @@ def parse_args(argv):
         type=str,
         help="Task(s) that will be used",
     )
-
     parser.add_argument(
         "-m",
         "--model",
@@ -52,7 +50,6 @@ def parse_args(argv):
         "3 - SeparateLatentMultitask, "
         "4 - SharedSeparateLatentMultitask",
     )
-
     parser.add_argument(
         "-l",
         "--latent-channels",
@@ -60,7 +57,6 @@ def parse_args(argv):
         type=int,
         help="Number of channels in the latent code (information bottleneck) of the network",
     )
-
     parser.add_argument(
         "-c",
         "--conv-channels",
@@ -70,11 +66,9 @@ def parse_args(argv):
         help="Number of channels in all convolutions of the network (except the layers right "
         "before and after the bottleneck)",
     )
-
     parser.add_argument(
         "-w", "--wandb-run-name", required=True, help="additional name for the run"
     )
-
     parser.add_argument(
         "-e",
         "--epochs",
@@ -89,7 +83,6 @@ def parse_args(argv):
         type=float,
         help="Learning rate for the main loss (default: %(default)s)",
     )
-
     parser.add_argument(
         "-lra",
         "--learning-rate-aux",
@@ -97,7 +90,6 @@ def parse_args(argv):
         type=float,
         help="Learning rate for the auxilary loss(default: %(default)s)",
     )
-
     parser.add_argument(
         "-n",
         "--num-workers",
@@ -109,22 +101,26 @@ def parse_args(argv):
         "--lmbda",
         type=float,
         default=1e-2,
-        help="Bit-rate distortion parameter (default: %(default)s)",
+        help="Bit-rate distortion tradeoff parameter (default: %(default)s)",
     )
     parser.add_argument(
         "--batch-size", type=int, default=16, help="Batch size (default: %(default)s)"
     )
-
     parser.add_argument(
         "-g", "--devices", default=1, type=int, help="Number of devices to use"
     )
-
     parser.add_argument(
         "-a",
         "--accelerator",
         default="gpu",
         choices=("mps", "cpu", "gpu"),
         help="Which accelerator to use",
+    )
+    parser.add_argument(
+        "-p",
+        "--precision",
+        default="32",
+        help="Precision arithmetic used for trainning",
     )
 
     args = parser.parse_args(argv)
@@ -255,6 +251,7 @@ def main(args):
         check_val_every_n_epoch=1,
         enable_progress_bar=True,
         logger=wandb_logger,
+        precision=args.precision,
         callbacks=[
             callbacks.LogPredictionSamplesCallback(wandb_logger=wandb_logger),
             ModelCheckpoint(every_n_epochs=50, filename=args.wandb_run_name),
