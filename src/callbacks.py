@@ -1,7 +1,3 @@
-from typing import Any
-
-import torch
-
 from torch.utils.data import DataLoader
 
 import pytorch_lightning as pl

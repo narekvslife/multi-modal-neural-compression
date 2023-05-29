@@ -183,7 +183,7 @@ class MultiTaskDisjointLatentCompressor(MultiTaskCompressor):
 
         return model
     
-    def forward_ouptut_heads(self, stacked_latent_values):
+    def forward_output_heads(self, stacked_latent_values):
         
         x_hats = {}
         for task_i, task in enumerate(self.tasks):
