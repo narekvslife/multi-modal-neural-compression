@@ -176,7 +176,6 @@ def get_dataloader(
         batch_size=batch_size,
         num_workers=num_workers,
         collate_fn=collate,
-        tasks=tasks
     )
 
     return dataset, dataloader
@@ -207,6 +206,7 @@ def main(args):
         dataset_name=args.dataset,
         batch_size=args.batch_size,
         num_workers=args.num_workers,
+        tasks=args.tasks,
         is_train=False,
         collate=default_collate,
     )
