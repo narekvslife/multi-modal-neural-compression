@@ -176,6 +176,7 @@ def get_dataloader(
         batch_size=batch_size,
         num_workers=num_workers,
         collate_fn=collate,
+        tasks=tasks
     )
 
     return dataset, dataloader
