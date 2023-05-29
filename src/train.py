@@ -254,7 +254,7 @@ def main(args):
         precision=args.precision if not args.precision.isnumeric() else int(args.precision),
         callbacks=[
             callbacks.LogPredictionSamplesCallback(wandb_logger=wandb_logger),
-            ModelCheckpoint(every_n_epochs=50, filename=args.wandb_run_name),
+            ModelCheckpoint(every_n_epochs=100, filename=args.wandb_run_name),
             LearningRateMonitor(),
         ],
     )
