@@ -85,7 +85,7 @@ def parse_args(argv):
     parser.add_argument(
         "-lrm",
         "--learning-rate-main",
-        default=1e-5,
+        default=1e-4,
         type=float,
         help="Learning rate for the main loss (default: %(default)s)",
     )

@@ -407,11 +407,24 @@ class MultiTaskCompressor(pl.LightningModule):
         main_optimizer = torch.optim.Adam(
             self.get_main_parameters(), lr=self.learning_rate_main
         )
+
+        sch = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
+            main_optimizer,
+            T_0=100,
+            eta_min=1e-7
+        )
+        
         auxiliary_optimizer = torch.optim.Adam(
             self.get_auxiliary_parameters(), lr=self.learning_rate_aux
         )
 
-        return {"optimizer": main_optimizer}, {"optimizer": auxiliary_optimizer}
+        return {"optimizer": main_optimizer,
+                "lr_scheduler": {
+                    "scheduler": sch,
+                    "interval":  "epoch",
+                    "frequency": 1}
+                },\
+                {"optimizer": auxiliary_optimizer}
 
     def __step(self, batch, is_train):
 
@@ -447,6 +460,9 @@ class MultiTaskCompressor(pl.LightningModule):
             main_opt.zero_grad()
             self.manual_backward(loss)
             main_opt.step()
+
+            lr_scheduler = self.lr_schedulers()
+            lr_scheduler.step()
 
             # Auxilary optimization
             aux_loss = self.auxiliary_loss()
