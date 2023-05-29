@@ -17,6 +17,7 @@ from torchmetrics.functional.image.psnr import peak_signal_noise_ratio
 
 from compressai.layers import GDN
 from compressai.models.utils import conv, deconv
+from compressai.models.base import get_scale_table
 
 from datasets import task_configs
 
@@ -468,23 +469,34 @@ class MultiTaskCompressor(pl.LightningModule):
         return self.__step(batch, is_train=False)
 
 
-    def update_bottleneck_quantiles(self):
-        self.model["compressor"].entropy_bottleneck.update()
+    def update_bottleneck_values(self):
+        self.model["compressor"].gaussian_conditional.update_scale_table(get_scale_table())
+        entr = self.model["compressor"].entropy_bottleneck.update()
+        return  entr
+    
+    def forward(self, batch) -> Tuple[Dict[str, torch.Tensor], Dict[str, torch.Tensor]]:
+
+        stacked_t = self.forward_input_heads(batch)
+
+        compressor_outputs = self.model["compressor"](stacked_t)
+
+        stacked_t_hat = compressor_outputs["x_hat"]
+
+        # {"y": y_likelihoods, "z": z_likelihoods}
+        stacked_t_likelihoods = compressor_outputs["likelihoods"]
+
+        # x_hats = {"task1": [torch_tensor_1_1_hat, ..., torch_tensor_B_1_hat], ... }
+        x_hats = self.forward_output_heads(stacked_t_hat)
+
+        return x_hats, stacked_t_likelihoods
 
     def compress(self, batch):
-        self.update_bottleneck_quantiles()
-
         x = self.forward_input_heads(batch)
-        ans = self.model["compressor"].compress(
-            x
-        )  # {"strings": [y_strings, z_strings],"shape": z.size()[-2:]}
+        ans = self.model["compressor"].compress(x)  
 
+        # {"strings": [y_strings, z_strings],"shape": z.size()[-2:]}
         return ans
 
-    def decompress(self, strings, shape):
-        compressor = self.model["compressor"]
-
-        compressor.entropy_bottleneck.update()
-
-        x_hat = self.model["compressor"].decompress(strings, shape)
-        return self.forward_output_heads(x_hat)
+    def decompress(self, strings, shape):        
+        stacked_latent_values = self.model["compressor"].decompress(strings, shape)["x_hat"]
+        return self.forward_output_heads(stacked_latent_values)

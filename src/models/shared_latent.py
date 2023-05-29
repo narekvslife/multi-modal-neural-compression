@@ -149,28 +149,18 @@ class MultiTaskSharedLatentCompressor(MultiTaskDisjointLatentCompressor):
         total_loss += shared_compression_loss
 
         return total_loss, logs
+    
+    def forward_output_heads(self, stacked_latent_values):
+        B, _, H, W = stacked_latent_values.shape
 
-    def forward(self, batch) -> Tuple[Dict[str, torch.Tensor], Dict[str, torch.Tensor]]:
-
-        stacked_t = self.forward_input_heads(batch)
-
-        compressor_outputs = self.model["compressor"](stacked_t)
-
-        stacked_t_hat = compressor_outputs["x_hat"]
-
-        # {"y": y_likelihoods, "z": z_likelihoods}
-        stacked_t_likelihoods = compressor_outputs["likelihoods"]
-
-        B, _, H, W = stacked_t_hat.shape
-
-        # x_hats = {"task1": [torch_tensor_1_1_hat, ..., torch_tensor_B_1_hat], ... }
         x_hats = {}
+
         for task_i, task in enumerate(self.tasks):
-            task_values = self._get_task_channels(stacked_t_hat, task)
-            shared_values = self.__get_shared_channels(stacked_t_hat)
+            task_values = self._get_task_channels(stacked_latent_values, task)
+            shared_values = self.__get_shared_channels(stacked_latent_values)
 
             stacked_values = torch.stack([task_values, shared_values], dim=1).reshape((B, -1, H, W))
 
             x_hats[task] = self.model["output_heads"][task_i](stacked_values)
 
-        return x_hats, stacked_t_likelihoods
+        return x_hats

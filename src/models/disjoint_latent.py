@@ -182,22 +182,12 @@ class MultiTaskDisjointLatentCompressor(MultiTaskCompressor):
         )
 
         return model
-
-    def forward(self, batch) -> Tuple[Dict[str, torch.Tensor], Dict[str, torch.Tensor]]:
-
-        stacked_t = self.forward_input_heads(batch)
-
-        compressor_outputs = self.model["compressor"](stacked_t)
-
-        stacked_t_hat = compressor_outputs["x_hat"]
-
-        # {"y": y_likelihoods, "z": z_likelihoods}
-        stacked_t_likelihoods = compressor_outputs["likelihoods"]
-
-        # x_hats = {"task1": [torch_tensor_1_1_hat, ..., torch_tensor_B_1_hat], ... }
+    
+    def forward_ouptut_heads(self, stacked_latent_values):
+        
         x_hats = {}
         for task_i, task in enumerate(self.tasks):
-            task_values = self._get_task_channels(stacked_t_hat, task)
+            task_values = self._get_task_channels(stacked_latent_values, task)
             x_hats[task] = self.model["output_heads"][task_i](task_values)
 
-        return x_hats, stacked_t_likelihoods
+        return x_hats

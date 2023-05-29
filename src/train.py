@@ -1,7 +1,7 @@
 import sys
 import argparse
 
-from typing import Tuple, Callable
+from typing import List, Tuple, Callable
 
 from datasets.transforms import task_configs
 
@@ -132,8 +132,9 @@ def parse_args(argv):
 
 # TODO: move this paths to configs
 DATASET_ROOTS = {
-    FASHION_MNIST: "../data/fashion-mnist",
-    MNIST: "../data/mnist",
+    FASHION_MNIST: "data/fashion-mnist",
+    MNIST: "data/mnist",
+    # CLEVR: "data/clevr",
     CLEVR: "../../vilabdatasets/clevr/clevr-taskonomy-complex/",
 }
 
@@ -142,6 +143,7 @@ def get_dataloader(
     dataset_name: str,
     batch_size: int,
     num_workers: int,
+    tasks: List[str],
     collate: Callable,
     is_train=False,
 ) -> Tuple[Dataset, DataLoader]:
@@ -162,7 +164,7 @@ def get_dataloader(
         )
     elif dataset_name == CLEVR:
         dataset = datasets.CLEVRDataset(
-            root, tasks=args.tasks, split="train" if is_train else "val"
+            root, tasks=tasks, split="train" if is_train else "val"
         )
     else:
         raise NotImplementedError(f"Dataset {dataset_name} is not supported")
@@ -195,6 +197,7 @@ def main(args):
         dataset_name=args.dataset,
         batch_size=args.batch_size,
         num_workers=args.num_workers,
+        tasks=args.tasks,
         is_train=True,
         collate=default_collate,
     )
