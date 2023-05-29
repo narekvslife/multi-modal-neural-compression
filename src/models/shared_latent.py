@@ -134,12 +134,12 @@ class MultiTaskSharedLatentCompressor(MultiTaskDisjointLatentCompressor):
         shared_likelihoods = self._get_task_likelihoods(all_likelihoods, "shared")
         
         for latent_type in ('y', 'z'):
-            shared_compression_loss += self._compression_loss(
+            shared_compression_loss += self._single_task_compression_loss(
                 likelihoods=shared_likelihoods[latent_type],
                 num_pixels=total_pixels
             )
 
-        total_loss -= self._compression_loss(
+        total_loss -= self._single_task_compression_loss(
                     likelihoods=shared_likelihoods["z"],
                     num_pixels=total_pixels)
         # ---

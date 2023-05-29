@@ -285,7 +285,7 @@ class MultiTaskCompressor(pl.LightningModule):
 
         return weighted_loss, logs
 
-    def _compression_loss(
+    def _single_task_compression_loss(
         self, likelihoods: torch.Tensor, num_pixels
     ) -> float:
         """
@@ -338,7 +338,7 @@ class MultiTaskCompressor(pl.LightningModule):
             # --- TODO: This part is very ScaleHyperprior specific 
             task_compression_loss = 0
             for latent_type in ('y', 'z'):
-                task_compression_loss += self._compression_loss(
+                task_compression_loss += self._single_task_compression_loss(
                     likelihoods=task_likelihoods[latent_type],
                     num_pixels=task_num_pixels
                 )
@@ -349,11 +349,17 @@ class MultiTaskCompressor(pl.LightningModule):
             total_loss += task_compression_loss
 
         # --- TODO: This part is very ScaleHyperprior specific 
-        total_loss -= self._compression_loss(
+        total_loss -= self._single_task_compression_loss(
                 likelihoods=all_likelihoods["z"],
                 num_pixels=task_num_pixels
             ) * (self.n_tasks - 1)
         # --- 
+        
+        # when computing _single_task_compression_loss for each task
+        # we averaged over the number of pixels in each task
+        # but when computing the total BPP 
+        # we should average over the total number of pixels
+        total_loss /= self.n_tasks
 
         return total_loss, logs
 
