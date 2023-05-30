@@ -510,13 +510,37 @@ class MultiTaskCompressor(pl.LightningModule):
         # x_hats = {"task1": [torch_tensor_1_1_hat, ..., torch_tensor_B_1_hat], ... }
         x_hats = self.forward_output_heads(stacked_t_hat)
 
+        compression_loss, other_comp_logs = self.multitask_compression_loss(
+            all_likelihoods=stacked_t_likelihoods, x_hats=x_hats, log_dir=""
+        )
+        print(compression_loss.item())
+        
         return x_hats, stacked_t_likelihoods
 
-    def compress(self, batch):
+    def compress(self, batch, print_info: False):
         x = self.forward_input_heads(batch)
         ans = self.model["compressor"].compress(x)  
 
-        # {"strings": [y_strings, z_strings],"shape": z.size()[-2:]}
+        if print_info:
+            number_of_bytes = 0
+            for latents in ans["strings"]:
+                for bit_string in latents:
+                    number_of_bytes += len(bit_string)
+
+            B, _, H, W = batch[self.tasks[0]].shape
+
+            bpp = number_of_bytes * 8 / B / H / W / self.n_tasks
+            print(f"Number of actual bytes in a string is: {number_of_bytes}, which gives a BPP = {bpp:.2f}")
+
+            stacked_t = self.forward_input_heads(batch)
+
+            stacked_t_likelihoods = self.model["compressor"](stacked_t)["likelihoods"]
+
+            compression_loss, _ = self.multitask_compression_loss(
+                all_likelihoods=stacked_t_likelihoods, x_hats=batch, log_dir=""
+            )
+            print(f"Estimated BPP (compression loss) is: {compression_loss.item():.2f}")
+
         return ans
 
     def decompress(self, strings, shape):        

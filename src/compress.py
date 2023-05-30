@@ -103,10 +103,10 @@ def main(args):
     compressor.update_bottleneck_values()
 
     for batch in dataloader:
-        compressed_data = compressor.compress(batch)
+        compressed_data = compressor.compress(batch, print_info=True)
         strings, shape = compressed_data["strings"], compressed_data["shape"]
-        decompressed_data = compressor.decompress(strings, shape)
 
+        decompressed_data = compressor.decompress(strings, shape)
         decompressed_image = decompressed_data["depth_euclidean"][3].detach().permute(1, 2, 0)
 
         forwarded_image, _ = compressor(batch)
