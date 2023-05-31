@@ -410,8 +410,8 @@ class MultiTaskCompressor(pl.LightningModule):
 
         sch = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
             main_optimizer,
-            T_0=100,
-            eta_min=1e-7
+            T_0=self.trainer.max_epochs,
+            eta_min=1e-8
         )
         
         auxiliary_optimizer = torch.optim.Adam(
