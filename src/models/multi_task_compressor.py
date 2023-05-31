@@ -410,7 +410,7 @@ class MultiTaskCompressor(pl.LightningModule):
 
         sch = torch.optim.lr_scheduler.CosineAnnealingLR(
             main_optimizer,
-            T_max=self.trainer.max_epochs,
+            T_max=self.trainer.max_steps,
             eta_min=1e-8
         )
         
