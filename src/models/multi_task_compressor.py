@@ -410,7 +410,7 @@ class MultiTaskCompressor(pl.LightningModule):
 
         sch = torch.optim.lr_scheduler.CosineAnnealingLR(
             main_optimizer,
-            T_max=self.trainer.max_steps,
+            T_max=self.trainer.estimated_stepping_batches,
             eta_min=1e-8
         )
         
@@ -419,10 +419,7 @@ class MultiTaskCompressor(pl.LightningModule):
         )
 
         return {"optimizer": main_optimizer,
-                "lr_scheduler": {
-                    "scheduler": sch,
-                    "interval":  "epoch",
-                    "frequency": 1}
+                "lr_scheduler": {"scheduler": sch}
                 },\
                 {"optimizer": auxiliary_optimizer}
 
@@ -461,9 +458,6 @@ class MultiTaskCompressor(pl.LightningModule):
             self.manual_backward(loss)
             main_opt.step()
 
-            lr_scheduler = self.lr_schedulers()
-            lr_scheduler.step()
-
             # Auxilary optimization
             aux_loss = self.auxiliary_loss()
 
@@ -472,6 +466,10 @@ class MultiTaskCompressor(pl.LightningModule):
             aux_opt.zero_grad()
             self.manual_backward(loss=aux_loss)
             aux_opt.step()
+
+            # Step for learning rate scheduler
+            lr_scheduler = self.lr_schedulers()
+            lr_scheduler.step()
 
         metric_logs = self.average_metrics(x=batch, x_hats=x_hats, log_dir=log_dir)
 
@@ -509,11 +507,6 @@ class MultiTaskCompressor(pl.LightningModule):
 
         # x_hats = {"task1": [torch_tensor_1_1_hat, ..., torch_tensor_B_1_hat], ... }
         x_hats = self.forward_output_heads(stacked_t_hat)
-
-        compression_loss, other_comp_logs = self.multitask_compression_loss(
-            all_likelihoods=stacked_t_likelihoods, x_hats=x_hats, log_dir=""
-        )
-        print(compression_loss.item())
         
         return x_hats, stacked_t_likelihoods
 
