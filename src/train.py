@@ -5,6 +5,7 @@ from typing import List, Tuple, Callable
 
 from datasets.transforms import task_configs
 
+import torch
 from torch.utils.data import DataLoader, Dataset, Subset
 
 import torchvision
@@ -122,7 +123,11 @@ def parse_args(argv):
         default="32",
         help="Precision arithmetic used for trainning",
     )
-
+    parser.add_argument(
+        "--wandb_checkpoint_path",
+        default=None,
+        help="Name of model checkpoint from a particular run. Looks like: <entity>/<project>/model-<run>:v#",
+    )
     args = parser.parse_args(argv)
     return args
 
@@ -258,6 +263,18 @@ def main(args):
             LearningRateMonitor(),
         ],
     )
+        
+    if args.wandb_checkpoint_path:
+        import wandb
+        run = wandb.init()
+        artifact = run.use_artifact(args.wandb_checkpoint_path, type='model')
+        artifact_dir = artifact.download()
+
+        checkpoint_path = f"{artifact_dir}/model.ckpt"
+        
+        ckpt_params = torch.load(checkpoint_path, map_location=args.accelerator)
+        compressor = model_type(**ckpt_params["hyper_parameters"])
+        compressor.load_state_dict(ckpt_params["state_dict"])
 
     trainer.fit(
         model=compressor,
