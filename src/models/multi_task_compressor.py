@@ -510,7 +510,7 @@ class MultiTaskCompressor(pl.LightningModule):
         
         return x_hats, stacked_t_likelihoods
 
-    def compress(self, batch, print_info: False):
+    def compress(self, batch, print_info: bool = False):
         x = self.forward_input_heads(batch)
         ans = self.model["compressor"].compress(x)  
 
@@ -534,7 +534,7 @@ class MultiTaskCompressor(pl.LightningModule):
             )
             print(f"Estimated BPP (compression loss) is: {compression_loss.item():.2f}")
 
-        return ans
+        return ans, number_of_bytes
 
     def decompress(self, strings, shape):        
         # stacked_latent_values = self.model["compressor"].decompress(strings, shape)["x_hat"]
