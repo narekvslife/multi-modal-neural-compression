@@ -232,18 +232,34 @@ def main(args):
     output_channels = tuple(
         task_configs.task_parameters[t]["out_channels"] for t in args.tasks
     )
+    if args.wandb_checkpoint_path:
+        import wandb
+        run = wandb.run
+        artifact = run.use_artifact(args.wandb_checkpoint_path, type='model')
+        artifact_dir = artifact.download()
 
-    compressor = model_type(
-        compressor_backbone_class=ScaleHyperprior,
-        tasks=args.tasks,
-        input_channels=input_channels,
-        output_channels=output_channels,
-        latent_channels=args.latent_channels,
-        conv_channels=args.conv_channels,
-        lmbda=args.lmbda,
-        learning_rate_main=args.learning_rate_main,
-        learning_rate_aux=args.learning_rate_aux,
-    )
+        checkpoint_path = f"{artifact_dir}/model.ckpt"
+        
+        ckpt_params = torch.load(checkpoint_path, map_location=args.accelerator)
+        compressor = model_type(**ckpt_params["hyper_parameters"])
+        compressor.load_state_dict(ckpt_params["state_dict"])
+        
+        # Because we want to set new learning rates instead of using the ones from the run
+        compressor.learning_rate_main = args.learning_rate_main
+        compressor.learning_rate_aux = args.learning_rate_aux,
+    else:
+        compressor = model_type(
+            compressor_backbone_class=ScaleHyperprior,
+            tasks=args.tasks,
+            input_channels=input_channels,
+            output_channels=output_channels,
+            latent_channels=args.latent_channels,
+            conv_channels=args.conv_channels,
+            lmbda=args.lmbda,
+            learning_rate_main=args.learning_rate_main,
+            learning_rate_aux=args.learning_rate_aux,
+        )
+
 
     wandb_logger.experiment.config.update(
         {"architecture_type": compressor.get_model_name()}, allow_val_change=True
@@ -263,18 +279,6 @@ def main(args):
             LearningRateMonitor(),
         ],
     )
-        
-    if args.wandb_checkpoint_path:
-        import wandb
-        run = wandb.init()
-        artifact = run.use_artifact(args.wandb_checkpoint_path, type='model')
-        artifact_dir = artifact.download()
-
-        checkpoint_path = f"{artifact_dir}/model.ckpt"
-        
-        ckpt_params = torch.load(checkpoint_path, map_location=args.accelerator)
-        compressor = model_type(**ckpt_params["hyper_parameters"])
-        compressor.load_state_dict(ckpt_params["state_dict"])
 
     trainer.fit(
         model=compressor,
