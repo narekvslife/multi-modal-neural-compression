@@ -240,13 +240,13 @@ def main(args):
 
         checkpoint_path = f"{artifact_dir}/model.ckpt"
         
-        ckpt_params = torch.load(checkpoint_path, map_location=args.accelerator)
+        ckpt_params = torch.load(checkpoint_path, map_location="cuda:0")
         compressor = model_type(**ckpt_params["hyper_parameters"])
         compressor.load_state_dict(ckpt_params["state_dict"])
         
         # Because we want to set new learning rates instead of using the ones from the run
         compressor.learning_rate_main = args.learning_rate_main
-        compressor.learning_rate_aux = args.learning_rate_aux,
+        compressor.learning_rate_aux = args.learning_rate_aux
     else:
         compressor = model_type(
             compressor_backbone_class=ScaleHyperprior,
