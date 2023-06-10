@@ -514,15 +514,17 @@ class MultiTaskCompressor(pl.LightningModule):
         x = self.forward_input_heads(batch)
         ans = self.model["compressor"].compress(x)  
 
-        if print_info:
-            number_of_bytes = 0
-            for latents in ans["strings"]:
-                for bit_string in latents:
-                    number_of_bytes += len(bit_string)
+        number_of_bytes = 0
 
+        for latents in ans["strings"]:
+            for bit_string in latents:
+                number_of_bytes += len(bit_string)
+
+        if print_info:
             B, _, H, W = batch[self.tasks[0]].shape
 
             bpp = number_of_bytes * 8 / B / H / W / self.n_tasks
+        
             print(f"Number of actual bytes in a string is: {number_of_bytes}, which gives a BPP = {bpp:.2f}")
 
             stacked_t = self.forward_input_heads(batch)
