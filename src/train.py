@@ -135,7 +135,7 @@ def parse_args(argv):
 DATASET_ROOTS = {
     FASHION_MNIST: "data/fashion-mnist",
     MNIST: "data/mnist",
-    # CLEVR: "data/clevr",
+    # CLEVR: "../data/clevr",
     CLEVR: "../../vilabdatasets/clevr/clevr-taskonomy-complex/",
 }
 
@@ -232,7 +232,7 @@ def main(args):
     output_channels = tuple(
         task_configs.task_parameters[t]["out_channels"] for t in args.tasks
     )
-    if args.wandb_checkpoint_path:
+    if args.wandb_checkpoint_path.lower() != "none":
         import wandb
         run = wandb.run
         artifact = run.use_artifact(args.wandb_checkpoint_path, type='model')
