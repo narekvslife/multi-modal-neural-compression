@@ -3,6 +3,7 @@ import argparse
 
 import pytorch_lightning as pl
 import torch
+from tqdm import tqdm
 
 import models
 import datasets
@@ -75,10 +76,10 @@ def main(args):
     _, dataloader = train.get_dataloader(
         dataset_name=args.dataset,
         batch_size=args.batch_size,
-        num_workers=0,
+        num_workers=args.num_workers,
         tasks=args.tasks,
         is_train=True,
-        collate=default_collate,
+        collate=default_collate
     )
 
     # TODO: move this to config as dictionary
@@ -99,23 +100,28 @@ def main(args):
     
     compressor = model_type(**ckpt_params["hyper_parameters"]).eval()
     compressor.load_state_dict(ckpt_params["state_dict"])
-
     compressor.update_bottleneck_values()
 
-    for batch in dataloader:
-        compressed_data = compressor.compress(batch, print_info=True)
-        strings, shape = compressed_data["strings"], compressed_data["shape"]
+    compressor = compressor.to(args.accelerator)
 
-        decompressed_data = compressor.decompress(strings, shape)
-        decompressed_image = decompressed_data["depth_euclidean"][3].detach().permute(1, 2, 0)
+    total_bytes = 0
+    for batch in tqdm(dataloader):
+        _, batch_bytes = compressor.compress(batch)
+        total_bytes += batch_bytes
 
-        forwarded_image, _ = compressor(batch)
-        forwarded_image = forwarded_image["depth_euclidean"][3].detach().permute(1, 2, 0) 
+        # strings, shape = compressed_data["strings"], compressed_data["shape"]
+
+        # _, batch_bytes  = compressor.decompress(strings, shape)
+        # decompressed_image = decompressed_data["depth_euclidean"][3].detach().permute(1, 2, 0)
+
+        # forwarded_image, _ = compressor(batch)
+        # forwarded_image = forwarded_image["depth_euclidean"][3].detach().permute(1, 2, 0) 
         
-        original_image = batch["depth_euclidean"][3].detach().permute(1, 2, 0)
+        # original_image = batch["depth_euclidean"][3].detach().permute(1, 2, 0)
 
-        utils.show_images([decompressed_image, forwarded_image, original_image])
-        break
+        # utils.show_images([decompressed_image, forwarded_image, original_image])
+
+    print(f"Compressed train dataset takes up {(total_bytes / 1024):.2f} KB")
 
 
 if __name__ == "__main__":
