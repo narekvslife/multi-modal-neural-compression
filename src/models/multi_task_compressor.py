@@ -248,11 +248,10 @@ class MultiTaskCompressor(pl.LightningModule):
             loss = F.mse_loss(x, x_hat, reduction="none")
             # sum over all dimensions, average over batch dimension
             # and over channels so that images with different number of channels have the same effect
+            # NOTE: that we do not average over Height and Width. This is basically MSE * H * W
             loss = loss.sum(dim=[1, 2, 3]).mean(dim=[0]) / x.shape[1]
         elif loss_type == "l1":
             loss = F.l1_loss(x, x_hat, reduction="none")
-            # sum over all dimensions, average over batch dimension
-            # and over channels so that images with different number of channels have the same effect
             loss = loss.sum(dim=[1, 2, 3]).mean(dim=[0]) / x.shape[1]
         elif loss_type == "cross-entropy":
             loss = F.cross_entropy(
@@ -440,7 +439,7 @@ class MultiTaskCompressor(pl.LightningModule):
             all_likelihoods=likelihoods, x_hats=x_hats, log_dir=log_dir
         )
 
-        loss = self.lmbda * reconstruction_loss
+        loss = self.lmbda * reconstruction_loss + compression_loss
 
         log_dict = {
             f"{log_dir}/rec_loss": reconstruction_loss,
