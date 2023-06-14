@@ -440,7 +440,7 @@ class MultiTaskCompressor(pl.LightningModule):
             all_likelihoods=likelihoods, x_hats=x_hats, log_dir=log_dir
         )
 
-        loss = self.lmbda * reconstruction_loss + compression_loss
+        loss = self.lmbda * reconstruction_loss
 
         log_dict = {
             f"{log_dir}/rec_loss": reconstruction_loss,
