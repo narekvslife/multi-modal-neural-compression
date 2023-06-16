@@ -217,34 +217,6 @@ def main(args):
         resume="allow",
     )
 
-    default_collate = make_collate_fn(args.tasks)
-
-    _, dataloader_train = get_dataloader(
-        dataset_name=args.dataset,
-        batch_size=args.batch_size,
-        num_workers=args.num_workers,
-        tasks=args.tasks,
-        is_train=True,
-        collate=default_collate,
-    )
-
-    _, dataloader_val = get_dataloader(
-        dataset_name=args.dataset,
-        batch_size=args.batch_size,
-        num_workers=args.num_workers,
-        tasks=args.tasks,
-        is_train=False,
-        collate=default_collate,
-    )
-
-
-    input_channels = tuple(
-        task_configs.task_parameters[t]["in_channels"] for t in args.tasks
-    )
-    output_channels = tuple(
-        task_configs.task_parameters[t]["out_channels"] for t in args.tasks
-    )
-
     checkpoint_path = None
     # this is the case where we want to take a checkpoint and start a new experiment from that
     if args.wandb_checkpoint_path.lower() != "none":
@@ -254,12 +226,18 @@ def main(args):
     
     # this is the case where we want to continue a run and report to the same experiment
     elif args.continue_run_id.lower() != "none":
-        checkpoint_path, model_name = utils.find_last_wandb_checkpoint(wandb.run)
+        checkpoint_path, model_name, tasks = utils.find_last_wandb_checkpoint(wandb.run)
         model_type = MODEL_NAME[model_name]
         compressor = utils.load_from_checkpoint(checkpoint_path, model_type)
-    
     else:
         model_type = MODEL_NUMBER[args.model]
+
+        input_channels = tuple(
+            task_configs.task_parameters[t]["in_channels"] for t in args.tasks
+        )
+        output_channels = tuple(
+            task_configs.task_parameters[t]["out_channels"] for t in args.tasks
+        )
 
         compressor = model_type(
             compressor_backbone_class=ScaleHyperprior,
@@ -273,6 +251,28 @@ def main(args):
             learning_rate_aux=args.learning_rate_aux,
         )
 
+        tasks = args.tasks
+
+
+    default_collate = make_collate_fn(tasks)
+
+    _, dataloader_train = get_dataloader(
+        dataset_name=args.dataset,
+        batch_size=args.batch_size,
+        num_workers=args.num_workers,
+        tasks=tasks,
+        is_train=True,
+        collate=default_collate,
+    )
+
+    _, dataloader_val = get_dataloader(
+        dataset_name=args.dataset,
+        batch_size=args.batch_size,
+        num_workers=args.num_workers,
+        tasks=tasks,
+        is_train=False,
+        collate=default_collate,
+    )
 
     wandb_logger.experiment.config.update(
         {"architecture_type": compressor.get_model_name()}, allow_val_change=True

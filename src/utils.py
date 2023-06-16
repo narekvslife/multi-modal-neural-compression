@@ -38,8 +38,11 @@ def find_last_wandb_checkpoint(run) -> str:
     artifact = run.use_artifact(api.artifact_versions("model", f"model-{run.id}")[0])
     artifact_dir = artifact.download()
     checkpoint_path = f"{artifact_dir}/model.ckpt"
+    
     model_name = list(filter(lambda x: x[0] == "architecture_type", run.config.items()))[0][1]
-    return checkpoint_path, model_name
+    tasks = list(filter(lambda x: x[0] == "tasks", run.config.items()))[0][1]
+    
+    return checkpoint_path, model_name, tasks
 
 def load_from_checkpoint(checkpoint_path, model_class):
 
