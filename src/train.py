@@ -248,13 +248,18 @@ def main(args):
         task_configs.task_parameters[t]["out_channels"] for t in args.tasks
     )
 
+    checkpoint_path = None
     # this is the case where we want to take a checkpoint and start a new experiment from that
     if args.wandb_checkpoint_path.lower() != "none":
         compressor = utils.load_wandb_checkpoint(wandb.run, model_type, args.wandb_checkpoint_path)
-        
+
         # Because we want to set new learning rates instead of using the ones from the run
         compressor.learning_rate_main = args.learning_rate_main
         compressor.learning_rate_aux = args.learning_rate_aux
+    # this is the case where we want to continue a run and report to the same experiment
+    if args.continue_run_id.lower() != "none":
+        # Here we need to find the latest checkpoint, and continue from that epoch
+        compressor, checkpoint_path = utils.find_last_wandb_checkpoint(wandb.run, model_type)
     else:
         compressor = model_type(
             compressor_backbone_class=ScaleHyperprior,
@@ -288,17 +293,12 @@ def main(args):
         ],
     )
 
-    continue_wandb_checkopoint_path = None
-    # this is the case where we want to continue a run and report to the same experiment
-    if args.continue_run_id.lower() != "none":
-        # Here we need to find the latest checkpoint, and continue from that epoch
-        continue_wandb_checkopoint_path = utils.find_last_wandb_checkpoint(wandb.run)
 
     trainer.fit(
         model=compressor,
         train_dataloaders=dataloader_train,
         val_dataloaders=dataloader_val,
-        ckpt_path=continue_wandb_checkopoint_path
+        ckpt_path=checkpoint_path
     )
 
 

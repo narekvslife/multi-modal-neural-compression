@@ -37,20 +37,24 @@ def load_wandb_checkpoint(run, model_class, checkpoint_path):
     artifact_dir = artifact.download()
 
     checkpoint_path = f"{artifact_dir}/model.ckpt"
-    
+
     ckpt_params = torch.load(checkpoint_path, map_location="cuda:0")
     model = model_class(**ckpt_params["hyper_parameters"])
     model.load_state_dict(ckpt_params["state_dict"])
 
     return model
 
-def find_last_wandb_checkpoint(run) -> str:
+def find_last_wandb_checkpoint(run, model_class) -> str:
     api = wandb.Api(overrides={"project": run.project, "entity": run.entity})
     artifact = run.use_artifact(api.artifact_versions("model", f"model-{run.id}")[0])
     artifact_dir = artifact.download()
     checkpoint_path = f"{artifact_dir}/model.ckpt"
 
-    return checkpoint_path
+    ckpt_params = torch.load(checkpoint_path, map_location="cuda:0")
+    model = model_class(**ckpt_params["hyper_parameters"])
+    model.load_state_dict(ckpt_params["state_dict"])
+
+    return model, checkpoint_path
 
 
 class DummyModule(nn.Module):
