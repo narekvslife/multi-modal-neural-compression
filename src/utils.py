@@ -9,7 +9,6 @@ from pytorch_lightning.loggers import WandbLogger
 
 WANDB_LOGGER = None
 
-
 def set_wandb_logger(run_name: str, project_name):
     global WANDB_LOGGER  # im so sorry. genuinely.
 
@@ -31,30 +30,25 @@ def show_images(images: list):
 
     plt.show()
 
+def load_wandb_checkpoint(run, artefact_path):
+    raise NotImplemented()
 
-def load_wandb_checkpoint(run, model_class, checkpoint_path):
-    artifact = run.use_artifact(checkpoint_path, type='model')
-    artifact_dir = artifact.download()
-
-    checkpoint_path = f"{artifact_dir}/model.ckpt"
-
-    ckpt_params = torch.load(checkpoint_path, map_location="cuda:0")
-    model = model_class(**ckpt_params["hyper_parameters"])
-    model.load_state_dict(ckpt_params["state_dict"])
-
-    return model
-
-def find_last_wandb_checkpoint(run, model_class) -> str:
+def find_last_wandb_checkpoint(run) -> str:
     api = wandb.Api(overrides={"project": run.project, "entity": run.entity})
     artifact = run.use_artifact(api.artifact_versions("model", f"model-{run.id}")[0])
     artifact_dir = artifact.download()
     checkpoint_path = f"{artifact_dir}/model.ckpt"
+    model_name = list(filter(lambda x: x[0] == "architecture_type", run.config.items()))[0][1]
+    return checkpoint_path, model_name
+
+def load_from_checkpoint(checkpoint_path, model_class):
 
     ckpt_params = torch.load(checkpoint_path, map_location="cuda:0")
+
     model = model_class(**ckpt_params["hyper_parameters"])
     model.load_state_dict(ckpt_params["state_dict"])
 
-    return model, checkpoint_path
+    return model
 
 
 class DummyModule(nn.Module):

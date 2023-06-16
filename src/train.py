@@ -7,7 +7,6 @@ from datasets.transforms import task_configs
 
 import wandb
 
-import torch
 from torch.utils.data import DataLoader, Dataset, Subset
 
 import torchvision
@@ -27,6 +26,17 @@ from datasets.transforms import make_collate_fn
 
 from constants import WANDB_PROJECT_NAME, MNIST, FASHION_MNIST, CLEVR
 
+
+MODEL_NUMBER = {1: models.SingleTaskCompressor,
+                2: models.MultiTaskMixedLatentCompressor,
+                3: models.MultiTaskDisjointLatentCompressor,
+                4: models.MultiTaskSharedLatentCompressor}
+
+MODEL_NAME = {"SingleTaskCompressor": models.SingleTaskCompressor,
+              "MultiTaskMixedLatentCompressor": models.MultiTaskMixedLatentCompressor,
+              "MultiTaskDisjointLatentCompressor": models.MultiTaskDisjointLatentCompressor,
+
+              "MultiTaskSharedLatentCompressor": models.MultiTaskSharedLatentCompressor}
 
 def parse_args(argv):
     parser = argparse.ArgumentParser(description="Example training script.")
@@ -227,19 +237,6 @@ def main(args):
         collate=default_collate,
     )
 
-    # TODO: move this to config as dictionary
-    if args.model == 1:
-        model_type = models.SingleTaskCompressor
-    elif args.model == 2:
-        model_type = models.MultiTaskMixedLatentCompressor
-    elif args.model == 3:
-        model_type = models.MultiTaskDisjointLatentCompressor
-    elif args.model == 4:
-        model_type = models.MultiTaskSharedLatentCompressor
-    else:
-        raise NotImplementedError(
-            f"Architecture number {args.model} is not a valid choice"
-        )
 
     input_channels = tuple(
         task_configs.task_parameters[t]["in_channels"] for t in args.tasks
@@ -251,16 +248,19 @@ def main(args):
     checkpoint_path = None
     # this is the case where we want to take a checkpoint and start a new experiment from that
     if args.wandb_checkpoint_path.lower() != "none":
-        compressor = utils.load_wandb_checkpoint(wandb.run, model_type, args.wandb_checkpoint_path)
-
-        # Because we want to set new learning rates instead of using the ones from the run
+        raise NotImplemented()
         compressor.learning_rate_main = args.learning_rate_main
         compressor.learning_rate_aux = args.learning_rate_aux
+    
     # this is the case where we want to continue a run and report to the same experiment
-    if args.continue_run_id.lower() != "none":
-        # Here we need to find the latest checkpoint, and continue from that epoch
-        compressor, checkpoint_path = utils.find_last_wandb_checkpoint(wandb.run, model_type)
+    elif args.continue_run_id.lower() != "none":
+        checkpoint_path, model_name = utils.find_last_wandb_checkpoint(wandb.run)
+        model_type = MODEL_NAME[model_name]
+        compressor = utils.load_from_checkpoint(checkpoint_path, model_type)
+    
     else:
+        model_type = MODEL_NUMBER[args.model]
+
         compressor = model_type(
             compressor_backbone_class=ScaleHyperprior,
             tasks=args.tasks,
