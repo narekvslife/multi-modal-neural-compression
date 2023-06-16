@@ -5,6 +5,8 @@ from typing import List, Tuple, Callable
 
 from datasets.transforms import task_configs
 
+import wandb
+
 import torch
 from torch.utils.data import DataLoader, Dataset, Subset
 
@@ -17,10 +19,11 @@ from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
 
 from compressai.models import ScaleHyperprior
 
+import utils
 import models
 import datasets
-from datasets.transforms import make_collate_fn
 import callbacks
+from datasets.transforms import make_collate_fn
 
 from constants import WANDB_PROJECT_NAME, MNIST, FASHION_MNIST, CLEVR
 
@@ -128,6 +131,11 @@ def parse_args(argv):
         default=None,
         help="Name of model checkpoint from a particular run. Looks like: <entity>/<project>/model-<run>:v#",
     )
+    parser.add_argument(
+        "--continue-run-id",
+        default=None,
+        help="id of a run to continue from last checkpoint",
+    )
     args = parser.parse_args(argv)
     return args
 
@@ -185,9 +193,16 @@ def get_dataloader(
 def main(args):
     pl.seed_everything(21)
 
+
+    # this is the case where we want to continue a run and report to the same experiment
+    wandb_run_id = None
+    if args.continue_run_id.lower() != "none":
+        wandb_run_id = args.continue_run_id
+
     wandb_logger = WandbLogger(
         name=args.wandb_run_name,
         project=WANDB_PROJECT_NAME,
+        id=wandb_run_id,
         log_model="all",
         resume="allow",
     )
@@ -232,17 +247,10 @@ def main(args):
     output_channels = tuple(
         task_configs.task_parameters[t]["out_channels"] for t in args.tasks
     )
-    if args.wandb_checkpoint_path.lower() != "none":
-        import wandb
-        run = wandb.run
-        artifact = run.use_artifact(args.wandb_checkpoint_path, type='model')
-        artifact_dir = artifact.download()
 
-        checkpoint_path = f"{artifact_dir}/model.ckpt"
-        
-        ckpt_params = torch.load(checkpoint_path, map_location="cuda:0")
-        compressor = model_type(**ckpt_params["hyper_parameters"])
-        compressor.load_state_dict(ckpt_params["state_dict"])
+    # this is the case where we want to take a checkpoint and start a new experiment from that
+    if args.wandb_checkpoint_path.lower() != "none":
+        compressor = utils.load_wandb_checkpoint(wandb.run, model_type, args.wandb_checkpoint_path)
         
         # Because we want to set new learning rates instead of using the ones from the run
         compressor.learning_rate_main = args.learning_rate_main
@@ -280,10 +288,17 @@ def main(args):
         ],
     )
 
+    continue_wandb_checkopoint_path = None
+    # this is the case where we want to continue a run and report to the same experiment
+    if args.continue_run_id.lower() != "none":
+        # Here we need to find the latest checkpoint, and continue from that epoch
+        continue_wandb_checkopoint_path = utils.find_last_wandb_checkpoint(wandb.run)
+
     trainer.fit(
         model=compressor,
         train_dataloaders=dataloader_train,
         val_dataloaders=dataloader_val,
+        ckpt_path=continue_wandb_checkopoint_path
     )
 
 

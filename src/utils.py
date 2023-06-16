@@ -2,6 +2,9 @@ import torch.nn as nn
 
 import matplotlib.pyplot as plt
 
+import torch
+import wandb
+
 from pytorch_lightning.loggers import WandbLogger
 
 WANDB_LOGGER = None
@@ -27,6 +30,27 @@ def show_images(images: list):
         axs[i].imshow(images[i])
 
     plt.show()
+
+
+def load_wandb_checkpoint(run, model_class, checkpoint_path):
+    artifact = run.use_artifact(checkpoint_path, type='model')
+    artifact_dir = artifact.download()
+
+    checkpoint_path = f"{artifact_dir}/model.ckpt"
+    
+    ckpt_params = torch.load(checkpoint_path, map_location="cuda:0")
+    model = model_class(**ckpt_params["hyper_parameters"])
+    model.load_state_dict(ckpt_params["state_dict"])
+
+    return model
+
+def find_last_wandb_checkpoint(run) -> str:
+    api = wandb.Api(overrides={"project": run.project, "entity": run.entity})
+    artifact = run.use_artifact(api.artifact_versions("model", f"model-{run.id}")[0])
+    artifact_dir = artifact.download()
+    checkpoint_path = f"{artifact_dir}/model.ckpt"
+
+    return checkpoint_path
 
 
 class DummyModule(nn.Module):
