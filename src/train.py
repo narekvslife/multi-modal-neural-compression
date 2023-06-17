@@ -206,6 +206,7 @@ def main(args):
 
     # this is the case where we want to continue a run and report to the same experiment
     wandb_run_id = None
+    print("AAAA", args.continue_run_id.lower())
     if args.continue_run_id.lower() != "none":
         wandb_run_id = args.continue_run_id
 
