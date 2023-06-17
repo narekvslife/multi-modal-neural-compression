@@ -223,7 +223,7 @@ def main(args):
         raise NotImplemented()
         compressor.learning_rate_main = args.learning_rate_main
         compressor.learning_rate_aux = args.learning_rate_aux
-    
+
     # this is the case where we want to continue a run and report to the same experiment
     elif args.continue_run_id.lower() != "none":
         checkpoint_path, model_name, tasks = utils.find_last_wandb_checkpoint(wandb.run)
@@ -278,7 +278,19 @@ def main(args):
         {"architecture_type": compressor.get_model_name()}, allow_val_change=True
     )
 
+    # dont even ask me
+
+    # TODO: this is a crutch because pytorch ligning handles the optimizers terribly!!!!!
+    # it seems to load/save/store (?) the oprimizers parameters such as adam per-parameter-weights
+    # in random order, that's why during first train iteration when trying to update those weights
+    # we get a shape mismatch :)))))))))
+    class kek_strategy(pl.strategies.single_device.SingleDeviceStrategy):
+        @property
+        def lightning_restore_optimizer(self) -> bool:
+            return False
+
     trainer = pl.Trainer(
+            strategy=kek_strategy(device="cuda:0"),
         accelerator=args.accelerator,
         devices=args.devices,
         max_epochs=args.epochs,
@@ -292,7 +304,6 @@ def main(args):
             LearningRateMonitor(),
         ],
     )
-
 
     trainer.fit(
         model=compressor,
