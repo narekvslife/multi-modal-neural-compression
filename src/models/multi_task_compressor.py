@@ -207,30 +207,6 @@ class MultiTaskCompressor(pl.LightningModule):
 
         # we now concatenate them at the channel dimensions to pass through the compressor backbone
         return torch.concat(t_is, dim=1)
-        
-    def forward(self, batch) -> Tuple[Dict[str, torch.Tensor], Dict[str, torch.Tensor]]:
-        """
-        :param: batch - expected to be of the following form
-                {
-                 "task1": [torch_tensor_1_1, torch_tensor_2_1, ..., torch_tensor_B_1],
-                 "task2": [torch_tensor_1_2, torch_tensor_2_2, ..., torch_tensor_B_2],
-                  ...
-                 "taskM": [torch_tensor_1_M, torch_tensor_2_M, ..., torch_tensor_B_M],
-                }
-
-        :returns:(
-                {
-                 "task1": [torch_tensor_1_1_hat, ..., torch_tensor_B_1_hat],
-                 "task2": [torch_tensor_1_2_hat, ..., torch_tensor_B_2_hat],
-                  ...
-                 "taskM": [torch_tensor_1_M_hat, ..., torch_tensor_B_M_hat],
-                },
-                {"y": y_likelihoods, "z": z_likelihoods}
-            )
-        """
-
-        # forward() is model-specific
-        raise NotImplementedError()
 
     def reconstruction_loss(self, x_hat, x, loss_type: str = "mse") -> torch.Tensor:
         """
