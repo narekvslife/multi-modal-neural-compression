@@ -1,7 +1,6 @@
 import torch.nn as nn
 
 import matplotlib.pyplot as plt
-
 import torch
 import wandb
 
@@ -24,6 +23,7 @@ def get_wandb_logger():
 
 def show_images(images: list):
     fig, axs = plt.subplots(1, len(images))
+    fig.set_size_inches(20, 20)
 
     for i in range(len(images)):
         axs[i].imshow(images[i])
