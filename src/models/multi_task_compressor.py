@@ -380,7 +380,8 @@ class MultiTaskCompressor(pl.LightningModule):
 
     def configure_optimizers(self):
         main_optimizer = torch.optim.Adam(
-            self.get_main_parameters(), lr=self.learning_rate_main
+            list(self.get_main_parameters()) + 
+            list(self.loss_balancer.parameters()), lr=self.learning_rate_main
         )
 
         sch = torch.optim.lr_scheduler.CosineAnnealingLR(
