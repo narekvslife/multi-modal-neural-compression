@@ -256,6 +256,9 @@ class MultiTaskCompressor(pl.LightningModule):
 
         task_losses = self.loss_balancer(task_losses)
 
+        for i, task in enumerate(task_losses.keys()):
+            logs[f"uncertainty-weight/{task}"] = self.loss_balancer.log_vars[i]
+
         weighted_loss = sum(task_losses.values())
 
         return weighted_loss, logs
