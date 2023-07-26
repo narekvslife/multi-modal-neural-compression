@@ -155,8 +155,8 @@ class MultiTaskMixedLatentCompressor(MultiTaskCompressor):
     def forward_output_heads(self, stacked_latent_values):
         # x_hats = {"task1": [torch_tensor_1_1_hat, ..., torch_tensor_B_1_hat], ... }
         x_hats = {}
-        
-        for task_n, task in enumerate(self.tasks):
-            x_hats[task] = self.model["output_heads"][task_n](stacked_latent_values)
+
+        for task_i, task in enumerate(self.tasks):
+            x_hats[task] = self.model["output_heads"][task_i](stacked_latent_values)
 
         return x_hats

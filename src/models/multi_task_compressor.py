@@ -305,39 +305,41 @@ class MultiTaskCompressor(pl.LightningModule):
         total_loss = 0
         logs = dict()
 
+        # --- TODO: This part is very ScaleHyperprior specific 
+        task_num_pixels = self._get_number_of_pixels(x_hats, self.tasks[0])
+
+        z_compression_loss = self._bits_per_pixel(
+                    likelihoods=all_likelihoods['z'],
+                    num_pixels=task_num_pixels)
+        # --- 
+
         for task in self.tasks:
 
             task_likelihoods = self._get_task_likelihoods(all_likelihoods, task)
 
             task_num_pixels = self._get_number_of_pixels(x_hats, task)
 
-            task_compression_loss = 0
-            # --- TODO: This part is very ScaleHyperprior specific 
-            # Note: that we here we coud've skiped adding the Z latents for each task
-            #       but rather just add them later once. We do this to report a fair
-            #       number of bits for storing each task
-            for latent_type in ('y', 'z'):
-                task_compression_loss += self._bits_per_pixel(
-                    likelihoods=task_likelihoods[latent_type],
-                    num_pixels=task_num_pixels
+            task_compression_loss = self._bits_per_pixel(
+                likelihoods=task_likelihoods,
+                num_pixels=task_num_pixels
                 )
+
+            logs[f"{log_dir}/{task}/compression_loss"] = task_compression_loss 
+            # --- TODO: This part is very ScaleHyperprior specific 
+            logs[f"{log_dir}/{task}/compression_loss"] += z_compression_loss
             # --- 
 
-            logs[f"{log_dir}/{task}/compression_loss"] = task_compression_loss
-    
             total_loss += task_compression_loss
 
         # --- TODO: This part is very ScaleHyperprior specific 
-        total_loss -= self._bits_per_pixel(
-                likelihoods=all_likelihoods["z"],
-                num_pixels=task_num_pixels
-            ) * (self.n_tasks - 1)
+        total_loss += z_compression_loss
         # --- 
         
         # when computing _single_task_compression_loss for each task
         # we averaged over the number of pixels in each task
         # but when computing the total BPP 
         # we should average over the total number of pixels
+        # which is n_tasks times more than for a single task
         total_loss /= self.n_tasks
 
         return total_loss, logs

@@ -41,7 +41,7 @@ class MultiTaskSharedLatentCompressor(MultiTaskDisjointLatentCompressor):
             latent_channels = new_latent_channels
         
 
-        self.task_specific_channels_n = latent_channels // (n_tasks + 1)
+        self.latent_channels_per_task = latent_channels // (n_tasks + 1)
 
         super().__init__(
             compressor_backbone_class=compressor_backbone_class,
@@ -73,7 +73,7 @@ class MultiTaskSharedLatentCompressor(MultiTaskDisjointLatentCompressor):
         model["compressor"].g_s = DummyModule()
 
         model["output_heads"] = self._build_heads(
-            self.task_specific_channels_n * 2, self.output_channels, is_deconv=True
+            self.latent_channels_per_task * 2, self.output_channels, is_deconv=True
         )
 
         return model
@@ -82,7 +82,7 @@ class MultiTaskSharedLatentCompressor(MultiTaskDisjointLatentCompressor):
         self, tensor: torch.Tensor
     ) -> torch.Tensor:
         
-        return tensor[:, -self.task_specific_channels_n: , :, :]
+        return tensor[:, -self.latent_channels_per_task: , :, :]
 
     def _get_task_channels(
         self, tensor: torch.Tensor, task: str
@@ -100,8 +100,8 @@ class MultiTaskSharedLatentCompressor(MultiTaskDisjointLatentCompressor):
 
         task_index = self.tasks.index(task)
 
-        channel_l = task_index * self.task_specific_channels_n
-        channel_r = (task_index + 1) * self.task_specific_channels_n
+        channel_l = task_index * self.latent_channels_per_task
+        channel_r = (task_index + 1) * self.latent_channels_per_task
 
         return tensor[:, channel_l: channel_r, :, :]
     
@@ -110,12 +110,9 @@ class MultiTaskSharedLatentCompressor(MultiTaskDisjointLatentCompressor):
     ) -> Dict[str, torch.Tensor]:
 
         if task == "shared":
-            return {
-                "y": self.__get_shared_channels(likelihoods["y"]),
-                "z": likelihoods["z"],
-            }
+            return  self.__get_shared_channels(likelihoods["y"])
         else:
-            return super()._get_task_likelihoods(likelihoods, task)
+            return self._get_task_channels(likelihoods, task)
 
     def multitask_compression_loss(
         self,
@@ -127,26 +124,23 @@ class MultiTaskSharedLatentCompressor(MultiTaskDisjointLatentCompressor):
         # at this point we only have task-specific parts, without the shared part
         total_loss, logs = super().multitask_compression_loss(all_likelihoods, x_hats, log_dir)
 
-        total_pixels = sum([self._get_number_of_pixels(x_hats, task) for task in self.tasks])
-
-        # --- TODO: This part is very ScaleHyperprior specific 
-        shared_compression_loss = 0
         shared_likelihoods = self._get_task_likelihoods(all_likelihoods, "shared")
-        
-        for latent_type in ('y', 'z'):
-            shared_compression_loss += self._single_task_compression_loss(
-                likelihoods=shared_likelihoods[latent_type],
-                num_pixels=total_pixels
+        shared_compression_loss = self._bits_per_pixel(
+                likelihoods=shared_likelihoods,
+                num_pixels=self._get_number_of_pixels()
             )
-
-        total_loss -= self._single_task_compression_loss(
-                    likelihoods=shared_likelihoods["z"],
-                    num_pixels=total_pixels)
-        # ---
-
+        
         logs[f"{log_dir}/shared/compression_loss"] = shared_compression_loss
-
         total_loss += shared_compression_loss
+        
+        # --- TODO: This part is very ScaleHyperprior specific 
+        task_num_pixels = self._get_number_of_pixels(x_hats, self.tasks[0])
+        z_compression_loss = self._bits_per_pixel(
+                    likelihoods=all_likelihoods['z'],
+                    num_pixels=task_num_pixels)
+        
+        logs[f"{log_dir}/shared/compression_loss"] += z_compression_loss
+        # --- 
 
         return total_loss, logs
     

@@ -98,7 +98,7 @@ class MultiTaskDisjointLatentCompressor(MultiTaskCompressor):
     
     def _get_task_likelihoods(
         self, likelihoods: Dict[str, torch.Tensor], task: str
-    ) -> Dict[str, torch.Tensor]:
+    ) -> torch.Tensor:
         """
         In this model the information about each task is in the specific channels of the "y" latent.
         The number of channels is equal for all tasks. Note that we still use all of the "z" latents
@@ -108,10 +108,11 @@ class MultiTaskDisjointLatentCompressor(MultiTaskCompressor):
         :return:
         """
 
-        return {
-            "y": self._get_task_channels(likelihoods["y"], task),
-            "z": likelihoods["z"],
-        }
+        # return {
+        #     "y": self._get_task_channels(likelihoods["y"], task),
+        #     "z": likelihoods["z"],
+        # }
+        return self._get_task_channels(likelihoods["y"], task)
 
     def _build_heads(
         self,
