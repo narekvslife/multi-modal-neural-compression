@@ -66,20 +66,56 @@ class MultiTaskMixedLatentCompressor(MultiTaskCompressor):
         :return:
         """
         return likelihoods
-    
+
     def multitask_compression_loss(
         self,
         all_likelihoods: Dict[str, torch.Tensor],
         x_hats: Dict[str, torch.Tensor],
         log_dir: str,
     ) -> Tuple[float, Dict[str, float]]:
-        
-        total_loss, logs = super().multitask_compression_loss(
-            all_likelihoods=all_likelihoods, x_hats=x_hats, log_dir=log_dir
-        )
-        
-        return total_loss / self.n_tasks, logs
+        """
+
+        :param likelihoods:
+        :param x_hats:
+        :param log_dir:
+
+        :return:
+        """
+
+        total_loss = 0
+        logs = dict()
+
+        # Since mixed model has one latent for ALL tasks together
+        # same latent will be used to reconstruct EACH task separately
     
+        task_likelihoods = self._get_task_likelihoods(all_likelihoods, task)
+        
+        # note that here we divide by the number of pixels in a SINGLE task
+        # this is to fairly report the bit-rate for storing a single task
+        # later we will divide the same value by the number of tasks 
+        # because the same latents store not only a SINGLE task but ALL of them
+        single_task_num_pixels = self._get_number_of_pixels(x_hats, task)
+
+        # TODO: NOte that so far this code is very ScaleHyperprior specific
+        y_compression_loss = self._single_task_compression_loss(
+                    likelihoods=task_likelihoods['y'],
+                    num_pixels=single_task_num_pixels
+                )
+        
+        z_compression_loss = self._single_task_compression_loss(
+                    likelihoods=task_likelihoods['z'],
+                    num_pixels=single_task_num_pixels
+                )
+        
+        # Here we report bit rate for each of the single tasks
+        for task in self.tasks:
+            logs[f"{log_dir}/{task}/compression_loss"] = y_compression_loss + z_compression_loss
+
+        # The total loss is the same, however we divide 
+        total_loss = (y_compression_loss + z_compression_loss) / self.n_tasks
+
+        return total_loss, logs
+
     def _build_model(self) -> nn.ModuleDict:
         """
         x1 -> task_enc1 -> t_1 ->  ↓                              -> task_dec1 -> x1_hat
