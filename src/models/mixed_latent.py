@@ -97,12 +97,12 @@ class MultiTaskMixedLatentCompressor(MultiTaskCompressor):
         single_task_num_pixels = self._get_number_of_pixels(x_hats, task)
 
         # TODO: NOte that so far this code is very ScaleHyperprior specific
-        y_compression_loss = self._single_task_compression_loss(
+        y_compression_loss = self._bits_per_pixel(
                     likelihoods=task_likelihoods['y'],
                     num_pixels=single_task_num_pixels
                 )
         
-        z_compression_loss = self._single_task_compression_loss(
+        z_compression_loss = self._bits_per_pixel(
                     likelihoods=task_likelihoods['z'],
                     num_pixels=single_task_num_pixels
                 )
@@ -111,7 +111,8 @@ class MultiTaskMixedLatentCompressor(MultiTaskCompressor):
         for task in self.tasks:
             logs[f"{log_dir}/{task}/compression_loss"] = y_compression_loss + z_compression_loss
 
-        # The total loss is the same, however we divide 
+        # The total loss is the same, however we divide by the number of tasks
+        # because same latent store n_tasks times the number of pixels
         total_loss = (y_compression_loss + z_compression_loss) / self.n_tasks
 
         return total_loss, logs

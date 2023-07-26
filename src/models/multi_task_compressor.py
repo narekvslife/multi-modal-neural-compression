@@ -263,7 +263,7 @@ class MultiTaskCompressor(pl.LightningModule):
 
         return weighted_loss, logs
 
-    def _single_task_compression_loss(
+    def _bits_per_pixel(
         self, likelihoods: torch.Tensor, num_pixels
     ) -> float:
         """
@@ -272,8 +272,6 @@ class MultiTaskCompressor(pl.LightningModule):
         :param likelihoods: dictionary with likelihoods that need to be considered for this compression estimate
         :param num_pixels: number of pixels that these likelihoods encode
         """
-
-        compression_loss = 0
 
         compression_loss = torch.log(likelihoods).sum()
 
@@ -313,10 +311,13 @@ class MultiTaskCompressor(pl.LightningModule):
 
             task_num_pixels = self._get_number_of_pixels(x_hats, task)
 
-            # --- TODO: This part is very ScaleHyperprior specific 
             task_compression_loss = 0
+            # --- TODO: This part is very ScaleHyperprior specific 
+            # Note: that we here we coud've skiped adding the Z latents for each task
+            #       but rather just add them later once. We do this to report a fair
+            #       number of bits for storing each task
             for latent_type in ('y', 'z'):
-                task_compression_loss += self._single_task_compression_loss(
+                task_compression_loss += self._bits_per_pixel(
                     likelihoods=task_likelihoods[latent_type],
                     num_pixels=task_num_pixels
                 )
@@ -327,7 +328,7 @@ class MultiTaskCompressor(pl.LightningModule):
             total_loss += task_compression_loss
 
         # --- TODO: This part is very ScaleHyperprior specific 
-        total_loss -= self._single_task_compression_loss(
+        total_loss -= self._bits_per_pixel(
                 likelihoods=all_likelihoods["z"],
                 num_pixels=task_num_pixels
             ) * (self.n_tasks - 1)
