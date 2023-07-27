@@ -6,6 +6,8 @@ import wandb
 
 from pytorch_lightning.loggers import WandbLogger
 
+from torchvision import transforms
+
 WANDB_LOGGER = None
 
 def set_wandb_logger(run_name: str, project_name):
@@ -26,7 +28,7 @@ def show_images(images: list):
     fig.set_size_inches(20, 20)
 
     for i in range(len(images)):
-        axs[i].imshow(images[i])
+        axs[i].imshow(transforms.ToPILImage()(images[i].detach()))
 
     plt.show()
 

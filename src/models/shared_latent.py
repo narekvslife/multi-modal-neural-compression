@@ -41,7 +41,7 @@ class MultiTaskSharedLatentCompressor(MultiTaskDisjointLatentCompressor):
             latent_channels = new_latent_channels
         
 
-        self.latent_channels_per_task = latent_channels // (n_tasks + 1)
+        self.task_specific_channels_n = latent_channels // (n_tasks + 1)
 
         super().__init__(
             compressor_backbone_class=compressor_backbone_class,
@@ -73,7 +73,7 @@ class MultiTaskSharedLatentCompressor(MultiTaskDisjointLatentCompressor):
         model["compressor"].g_s = DummyModule()
 
         model["output_heads"] = self._build_heads(
-            self.latent_channels_per_task * 2, self.output_channels, is_deconv=True
+            self.task_specific_channels_n * 2, self.output_channels, is_deconv=True
         )
 
         return model
@@ -82,7 +82,7 @@ class MultiTaskSharedLatentCompressor(MultiTaskDisjointLatentCompressor):
         self, tensor: torch.Tensor
     ) -> torch.Tensor:
         
-        return tensor[:, -self.latent_channels_per_task: , :, :]
+        return tensor[:, -self.task_specific_channels_n: , :, :]
 
     def _get_task_channels(
         self, tensor: torch.Tensor, task: str
@@ -100,8 +100,8 @@ class MultiTaskSharedLatentCompressor(MultiTaskDisjointLatentCompressor):
 
         task_index = self.tasks.index(task)
 
-        channel_l = task_index * self.latent_channels_per_task
-        channel_r = (task_index + 1) * self.latent_channels_per_task
+        channel_l = task_index * self.task_specific_channels_n
+        channel_r = (task_index + 1) * self.task_specific_channels_n
 
         return tensor[:, channel_l: channel_r, :, :]
     
