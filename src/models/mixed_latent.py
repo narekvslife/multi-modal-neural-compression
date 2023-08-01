@@ -88,13 +88,13 @@ class MultiTaskMixedLatentCompressor(MultiTaskCompressor):
         # Since mixed model has one latent for ALL tasks together
         # same latent will be used to reconstruct EACH task separately
     
-        task_likelihoods = self._get_task_likelihoods(all_likelihoods, task)
+        task_likelihoods = self._get_task_likelihoods(all_likelihoods, self.tasks[0])
         
         # note that here we divide by the number of pixels in a SINGLE task
         # this is to fairly report the bit-rate for storing a single task
         # later we will divide the same value by the number of tasks 
         # because the same latents store not only a SINGLE task but ALL of them
-        single_task_num_pixels = self._get_number_of_pixels(x_hats, task)
+        single_task_num_pixels = self._get_number_of_pixels(x_hats, self.tasks[0])
 
         # TODO: NOte that so far this code is very ScaleHyperprior specific
         y_compression_loss = self._bits_per_pixel(
