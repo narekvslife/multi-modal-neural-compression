@@ -503,6 +503,8 @@ class MultiTaskCompressor(pl.LightningModule):
             for bit_string in latents:
                 number_of_bytes += len(bit_string)
 
+        stacked_t_likelihoods = None 
+
         if print_info:
             B, _, H, W = batch[self.tasks[0]].shape
 
