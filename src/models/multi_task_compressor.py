@@ -149,6 +149,10 @@ class MultiTaskCompressor(pl.LightningModule):
                     deconv(pti_c, pto_c, stride=1),
                     GDN(pto_c, inverse=True),
                     conv(pto_c, pto_c, kernel_size=3, stride=1),
+                    GDN(pto_c, inverse=True),
+                    conv(pto_c, pto_c, kernel_size=3, stride=1),
+                    GDN(pto_c, inverse=True),
+                    conv(pto_c, pto_c, kernel_size=3, stride=1),
                 )
             else:
                 head = nn.Sequential(
@@ -158,6 +162,12 @@ class MultiTaskCompressor(pl.LightningModule):
                     GDN(pto_c),
                     conv(pto_c, pto_c),
                     GDN(pto_c),
+                    conv(pto_c, pto_c),
+                    GDN(pto_c),
+                    conv(pto_c, pto_c),
+                    GDN(pto_c),
+                    conv(pto_c, pto_c),
+                    GDN(pto_c)
                 )
 
             list_of_modules.append(head)
